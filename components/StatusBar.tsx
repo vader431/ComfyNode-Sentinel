@@ -5,10 +5,7 @@ import {
   Folder,
   Layers,
   Terminal,
-  Cpu,
   Monitor,
-  CheckCircle2,
-  Clock,
   ShieldCheck,
 } from 'lucide-react';
 import { PipQueueItem } from '@/types';

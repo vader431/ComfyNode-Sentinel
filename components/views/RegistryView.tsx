@@ -2,17 +2,13 @@
 
 import React, { useState } from 'react';
 import {
-  Globe,
   Search,
   Star,
   Download,
-  Check,
   Plus,
   FileText,
   RotateCw,
   ExternalLink,
-  ShieldCheck,
-  Flame,
   CheckCircle2,
   History,
   Undo2,
@@ -140,6 +136,14 @@ export function RegistryView({
             >
               <FileText className="w-3.5 h-3.5" />
               <span>Batch URL Import</span>
+            </button>
+
+            <button
+              onClick={onCheckUpdates}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors"
+            >
+              <RotateCw className="w-3.5 h-3.5" />
+              <span>Check Updates</span>
             </button>
 
             <button

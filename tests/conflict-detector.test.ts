@@ -76,5 +76,15 @@ describe('conflict-detector', () => {
     const conflicts = detectDependencyConflicts(sample);
     expect(conflicts).toHaveLength(0);
   });
+
+  it('does not falsely report conflict for overlapping compatible version ranges', () => {
+    const sample = {
+      'NodeA': ['safetensors>=0.4.0', 'pillow>=10.0.0'],
+      'NodeB': ['safetensors<=0.4.5', 'pillow<=10.4.0'],
+    };
+
+    const conflicts = detectDependencyConflicts(sample);
+    expect(conflicts).toHaveLength(0);
+  });
 });
 

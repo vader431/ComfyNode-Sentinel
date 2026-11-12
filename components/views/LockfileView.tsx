@@ -6,17 +6,11 @@ import {
   Download,
   Copy,
   Check,
-  Upload,
   RefreshCw,
-  GitCommit,
   GitBranch,
   CheckCircle2,
-  AlertTriangle,
-  ArrowRight,
-  ShieldCheck,
   Server,
   Terminal,
-  ExternalLink,
 } from 'lucide-react';
 import { InstalledNode, ComfyLockfile, ReconciliationItem } from '@/types';
 import {

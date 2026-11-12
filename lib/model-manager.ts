@@ -304,3 +304,4 @@ export const INITIAL_MODEL_ASSETS: ModelAsset[] = [
     symlinkTarget: 'D:/AI_Models/Shared_VAE/sdxl_vae.safetensors',
   },
 ];
+

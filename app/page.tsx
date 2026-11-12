@@ -16,7 +16,6 @@ import { SettingsView } from '@/components/views/SettingsView';
 import { DocsView } from '@/components/views/DocsView';
 import { StorageService } from '@/lib/storage';
 import {
-  INITIAL_UPDATE_TRANSACTIONS,
   recordTransaction,
   rollbackTransaction,
 } from '@/lib/transaction-history';
@@ -67,7 +66,7 @@ export default function Home() {
   const [settings, setSettings] = useState<EnvironmentSettings>(() => StorageService.getSettings());
   const [logs, setLogs] = useState<TerminalLogEntry[]>(() => StorageService.getLogs());
   const [pipQueue, setPipQueue] = useState<PipQueueItem[]>(() => StorageService.getPipQueue());
-  const [transactions, setTransactions] = useState<UpdateTransaction[]>(INITIAL_UPDATE_TRANSACTIONS);
+  const [transactions, setTransactions] = useState<UpdateTransaction[]>(() => StorageService.getTransactions());
 
   const addLog = (entry: Omit<TerminalLogEntry, 'id'>) => {
     const newEntry: TerminalLogEntry = {
@@ -526,6 +525,7 @@ export default function Home() {
     });
 
     setTransactions(newTxList);
+    StorageService.setTransactions(newTxList);
     updateNodes(updated);
     setTimeout(() => {
       addLog({
@@ -541,6 +541,7 @@ export default function Home() {
     if (!rolledBackTx) return;
 
     setTransactions(updatedTransactions);
+    StorageService.setTransactions(updatedTransactions);
 
     const targetFolder = rolledBackTx.nodeFolderName;
     const targetCommit = rolledBackTx.previousCommit;
@@ -772,7 +773,7 @@ export default function Home() {
             onUninstallNode={handleUninstallNode}
             onRestoreNode={handleRestoreNode}
             onNormalizeBatch={handleNormalizeBatch}
-            onNavigateToDoctor={(nodeId) => {
+            onNavigateToDoctor={() => {
               setActiveTab('doctor');
             }}
             onNavigateToRunner={(cmd) => {

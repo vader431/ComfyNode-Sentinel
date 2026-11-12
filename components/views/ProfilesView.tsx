@@ -2,7 +2,6 @@
 
 import React, { useState, useRef } from 'react';
 import {
-  Workflow,
   Sparkles,
   Zap,
   Film,
@@ -13,9 +12,6 @@ import {
   Download,
   Plus,
   ArrowRight,
-  Layers,
-  FileImage,
-  FileCode,
 } from 'lucide-react';
 import {
   WorkspaceProfile,
@@ -23,7 +19,7 @@ import {
   WorkflowInspectionResult,
 } from '@/types';
 import { extractWorkflowFromBuffer } from '@/lib/png-metadata';
-import { COMMUNITY_REGISTRY, SAMPLE_WORKFLOW_JSON } from '@/lib/default-data';
+import { COMMUNITY_REGISTRY } from '@/lib/default-data';
 
 interface ProfilesViewProps {
   profiles: WorkspaceProfile[];
@@ -51,7 +47,6 @@ export function ProfilesView({
   const [isDragging, setIsDragging] = useState(false);
   const [inspectionResult, setInspectionResult] = useState<WorkflowInspectionResult | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
-  const [isParsing, setIsParsing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -69,7 +64,6 @@ export function ProfilesView({
   };
 
   const handleProcessFile = async (file: File) => {
-    setIsParsing(true);
     setErrorMessage(null);
     try {
       if (file.type.startsWith('image/') || file.name.endsWith('.png')) {
@@ -84,8 +78,6 @@ export function ProfilesView({
       setErrorMessage(err instanceof Error ? err.message : 'Error parsing workflow file.');
       setInspectionResult(null);
       setPreviewImageUrl(null);
-    } finally {
-      setIsParsing(false);
     }
   };
 

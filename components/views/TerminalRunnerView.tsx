@@ -2,21 +2,16 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Terminal,
   ShieldAlert,
   ShieldCheck,
   Play,
   Square,
   Trash2,
   CheckCircle2,
-  Clock,
-  Sparkles,
-  AlertTriangle,
   Flame,
   Layers,
   Search,
   X,
-  ArrowRight,
 } from 'lucide-react';
 import { PipQueueItem, TerminalLogEntry } from '@/types';
 
@@ -431,7 +426,7 @@ export function TerminalRunnerView({
               className="w-full mt-3 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors"
             >
               <Flame className="w-3.5 h-3.5 text-amber-400" />
-              <span>Simulate Pip Install Through Shield</span>
+              <span>Enqueue Pip Install Through Shield</span>
             </button>
           </div>
         </div>

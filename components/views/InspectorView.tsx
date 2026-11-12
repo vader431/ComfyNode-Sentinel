@@ -9,15 +9,12 @@ import {
   ExternalLink,
   Trash2,
   RotateCcw,
-  Sparkles,
   GitBranch,
   FolderGit2,
   CheckCircle2,
   AlertTriangle,
   AlertOctagon,
-  Eye,
   Wand2,
-  FolderSync,
   HardDrive,
   BarChart3,
   PieChart,
@@ -26,9 +23,8 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
-  Info,
 } from 'lucide-react';
-import { InstalledNode, HealthStatus } from '@/types';
+import { InstalledNode } from '@/types';
 
 interface InspectorViewProps {
   nodes: InstalledNode[];

@@ -65,6 +65,26 @@ const MUTUAL_EXCLUSIONS: {
   },
 ];
 
+function parseVersionParts(v: string): number[] {
+  return v.split('.').map((p) => {
+    const num = parseInt(p.replace(/[^0-9]/g, ''), 10);
+    return isNaN(num) ? 0 : num;
+  });
+}
+
+export function compareVersions(v1: string, v2: string): number {
+  const p1 = parseVersionParts(v1);
+  const p2 = parseVersionParts(v2);
+  const maxLen = Math.max(p1.length, p2.length);
+  for (let i = 0; i < maxLen; i++) {
+    const n1 = p1[i] ?? 0;
+    const n2 = p2[i] ?? 0;
+    if (n1 > n2) return 1;
+    if (n1 < n2) return -1;
+  }
+  return 0;
+}
+
 /**
  * Analyzes dependency requirements across multiple custom nodes and flags conflicts.
  */
@@ -126,10 +146,13 @@ export function detectDependencyConflicts(
       for (const lower of lowerBounds) {
         if (!upper.version || !lower.version) continue;
 
-        const upperMajor = parseInt(upper.version.split('.')[0], 10);
-        const lowerMajor = parseInt(lower.version.split('.')[0], 10);
+        const cmp = compareVersions(lower.version, upper.version);
+        // If lower > upper, always impossible (e.g. >= 2.0 vs < 1.26)
+        // If lower === upper, impossible if either boundary is strict (e.g. >= 2.0 vs < 2.0)
+        const isStrict = upper.comparator === '<' || lower.comparator === '>';
+        const isConflict = cmp > 0 || (cmp === 0 && isStrict);
 
-        if (lowerMajor >= upperMajor) {
+        if (isConflict) {
           conflicts.push({
             id: `conflict-bound-${pkgName}-${upper.nodeFolderName}-${lower.nodeFolderName}`,
             packageName: pkgName,

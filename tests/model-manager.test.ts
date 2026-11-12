@@ -115,3 +115,4 @@ describe('Pre-flight Workflow VRAM Estimator', () => {
     expect(result.tierRecommendation).toContain('Entry GPU');
   });
 });
+

@@ -5,6 +5,7 @@ import {
   EnvironmentSettings,
   PipQueueItem,
   TerminalLogEntry,
+  UpdateTransaction,
 } from '@/types';
 import {
   INITIAL_ROADMAP_TASKS,
@@ -12,6 +13,7 @@ import {
   INITIAL_PROFILES,
   DEFAULT_SETTINGS,
 } from './default-data';
+import { INITIAL_UPDATE_TRANSACTIONS } from './transaction-history';
 
 const STORAGE_KEYS = {
   TASKS: 'comfynode_tasks_v2',
@@ -23,6 +25,7 @@ const STORAGE_KEYS = {
   ALIASES: 'comfynode_aliases_v2',
   LOGS: 'comfynode_terminal_logs_v2',
   PIP_QUEUE: 'comfynode_pip_queue_v2',
+  TRANSACTIONS: 'comfynode_transactions_v2',
 };
 
 // Safe LocalStorage accessor
@@ -105,6 +108,11 @@ export const StorageService = {
   getPipQueue: (): PipQueueItem[] => getStoredItem(STORAGE_KEYS.PIP_QUEUE, []),
   setPipQueue: (queue: PipQueueItem[]): void => setStoredItem(STORAGE_KEYS.PIP_QUEUE, queue),
 
+  getTransactions: (): UpdateTransaction[] =>
+    getStoredItem(STORAGE_KEYS.TRANSACTIONS, INITIAL_UPDATE_TRANSACTIONS),
+  setTransactions: (txs: UpdateTransaction[]): void =>
+    setStoredItem(STORAGE_KEYS.TRANSACTIONS, txs),
+
   resetToDefaults: (): void => {
     if (typeof window === 'undefined') return;
     localStorage.removeItem(STORAGE_KEYS.TASKS);
@@ -116,5 +124,6 @@ export const StorageService = {
     localStorage.removeItem(STORAGE_KEYS.ALIASES);
     localStorage.removeItem(STORAGE_KEYS.LOGS);
     localStorage.removeItem(STORAGE_KEYS.PIP_QUEUE);
+    localStorage.removeItem(STORAGE_KEYS.TRANSACTIONS);
   },
 };

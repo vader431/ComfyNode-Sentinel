@@ -50,7 +50,7 @@ export function lintPythonNodeCode(
 
     // Check 2: Windows-only backslash path separator concatenation
     // E.g.: folder + "\\" + "file" or folder + "\\\\" + "file" or path.split('\\')
-    const windowsPathMatch = lineText.match(/(?:['"]\\\\['"]|['"]\\['"]|\+\s*['"]\\\\?.*?['"])/);
+    const windowsPathMatch = lineText.match(/(?:['"](?:\\\\|\\)['"]|\+\s*['"][^'"]*(?:\\\\|\\)[^'"]*['"]|\.split\(['"](?:\\\\|\\)['"]\))/);
     if (windowsPathMatch && (lineText.includes('+') || lineText.includes('split') || lineText.includes('join'))) {
       issues.push({
         id: `issue-path-${lineNum}`,

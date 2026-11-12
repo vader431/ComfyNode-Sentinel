@@ -39,12 +39,14 @@ config_file = "C:\\\\Users\\\\Developer\\\\ComfyUI\\\\config.yaml"
     expect(result.issues[0].rule).toBe('absolute_path');
   });
 
-  it('reports compliant for clean cross-platform code', () => {
+  it('reports compliant for clean cross-platform code and does not falsely flag string concatenation', () => {
     const code = `
 import os
 from .modules import sub_logic
 
 checkpoint_path = os.path.join(os.path.dirname(__file__), "models")
+title = "ComfyUI_" + name + "_Output"
+filename = base_prefix + "_preview.png"
 `;
     const result = lintPythonNodeCode(code, 'clean.py');
     expect(result.status).toBe('compliant');

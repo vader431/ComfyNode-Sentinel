@@ -55,3 +55,4 @@ describe('Update Transaction History & Git Bisect Assistant', () => {
     expect(script).toContain('git bisect reset');
   });
 });
+

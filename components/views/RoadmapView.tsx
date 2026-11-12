@@ -10,9 +10,6 @@ import {
   Share2,
   ChevronDown,
   ChevronUp,
-  Tag,
-  Clock,
-  Sparkles,
 } from 'lucide-react';
 import { RoadmapTask, PhaseId } from '@/types';
 

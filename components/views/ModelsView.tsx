@@ -4,7 +4,6 @@ import React, { useState } from 'react';
 import {
   HardDrive,
   Cpu,
-  Layers,
   Copy,
   Check,
   AlertTriangle,
@@ -62,7 +61,7 @@ export function ModelsView({ onRunTerminalCommand }: ModelsViewProps) {
     setTimeout(() => setCopiedGroupHash(null), 2000);
   };
 
-  const handleSimulateSymlinkDeduplication = (groupHash: string) => {
+  const handleDeduplicateAsset = (groupHash: string) => {
     // Keep the primary asset, mark secondary as symlink
     setModels((prev) => {
       let seenPrimary = false;
@@ -234,7 +233,7 @@ export function ModelsView({ onRunTerminalCommand }: ModelsViewProps) {
                           <span>Copy PowerShell Symlink</span>
                         </button>
                         <button
-                          onClick={() => handleSimulateSymlinkDeduplication(group.hash)}
+                          onClick={() => handleDeduplicateAsset(group.hash)}
                           className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium text-emerald-300 hover:text-white bg-emerald-950/40 hover:bg-emerald-900/60 rounded-md border border-emerald-800/60 transition-colors"
                         >
                           <FolderSync className="w-3.5 h-3.5" />
@@ -605,3 +604,4 @@ export function ModelsView({ onRunTerminalCommand }: ModelsViewProps) {
     </div>
   );
 }
+

@@ -2,7 +2,6 @@
 
 import React, { useState, useMemo } from 'react';
 import {
-  Stethoscope,
   CheckCircle2,
   AlertTriangle,
   AlertOctagon,
@@ -10,7 +9,6 @@ import {
   FileCode,
   Check,
   RotateCcw,
-  Sparkles,
   Layers,
   ShieldAlert,
   Flame,
@@ -43,7 +41,7 @@ export function HealthDoctorView({
   );
   const [patchedToast, setPatchedToast] = useState(false);
   const [severityFilter, setSeverityFilter] = useState<'all' | 'critical' | 'warning'>('all');
-  const [simulateConflict, setSimulateConflict] = useState<boolean>(true);
+  const [simulateConflict, setSimulateConflict] = useState<boolean>(false);
 
   // Analyze active code
   const lintResult: LintAnalysisResult = lintPythonNodeCode(

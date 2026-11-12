@@ -87,3 +87,4 @@ export const INITIAL_UPDATE_TRANSACTIONS: UpdateTransaction[] = [
     rollbackCommand: 'git -C custom_nodes/ComfyUI-AnimateDiff-Evolved checkout 4a1b82c',
   },
 ];
+

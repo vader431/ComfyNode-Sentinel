@@ -2,11 +2,9 @@
 
 import React, { useState } from 'react';
 import {
-  Settings,
   FolderCheck,
   Cpu,
   CheckCircle2,
-  AlertTriangle,
   RotateCcw,
   Check,
   ShieldCheck,
