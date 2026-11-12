@@ -21,6 +21,8 @@ import {
   HardDrive,
   BarChart3,
   PieChart,
+  X,
+  Filter,
 } from 'lucide-react';
 import { InstalledNode, HealthStatus } from '@/types';
 
@@ -191,9 +193,13 @@ export function InspectorView({
       const q = searchQuery.toLowerCase();
       const matchName = node.folderName.toLowerCase().includes(q);
       const matchClean = (aliases[node.folderName] || node.cleanDisplayName).toLowerCase().includes(q);
+      const matchAuthor = (node.author || '').toLowerCase().includes(q);
+      const matchCategory = (node.category || '').toLowerCase().includes(q);
       const matchDesc = node.description.toLowerCase().includes(q);
       const matchClasses = node.providesNodes.some((cls) => cls.toLowerCase().includes(q));
-      if (!matchName && !matchClean && !matchDesc && !matchClasses) return false;
+      if (!matchName && !matchClean && !matchAuthor && !matchCategory && !matchDesc && !matchClasses) {
+        return false;
+      }
     }
     return true;
   });
@@ -631,66 +637,109 @@ export function InspectorView({
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative flex-1 sm:w-72">
-            <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-slate-500" />
-            <input
-              type="text"
-              placeholder="Search by name, git, or node class..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-            />
+      <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 shadow-sm">
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-1">
+            {/* Search Input (Name, Author, Category, or Node Class) */}
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-slate-500 pointer-events-none" />
+              <input
+                type="text"
+                aria-label="Search installed nodes by name, author, or category"
+                placeholder="Search by name, author, or category..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-8 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  title="Clear search query"
+                  className="absolute right-2.5 top-2 text-slate-500 hover:text-slate-200 transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Category Filter Dropdown */}
+            <div className="relative flex items-center">
+              <Filter className="absolute left-3 w-3.5 h-3.5 text-indigo-400 pointer-events-none" />
+              <select
+                aria-label="Filter by category"
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                className="w-full sm:w-auto pl-8 pr-8 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer"
+              >
+                <option value="all">All Categories ({nodes.length})</option>
+                {categories.map((c) => {
+                  const count = nodes.filter((n) => n.category === c).length;
+                  return (
+                    <option key={c} value={c}>
+                      {c} ({count})
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+
+            {(searchQuery.trim() !== '' || categoryFilter !== 'all' || statusFilter !== 'all') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('');
+                  setCategoryFilter('all');
+                  setStatusFilter('all');
+                }}
+                className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-800 border border-slate-700 text-xs text-slate-300 hover:text-white transition-colors shrink-0"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Reset Filters</span>
+              </button>
+            )}
           </div>
 
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-indigo-500"
-          >
-            <option value="all">All Categories</option>
-            {categories.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-        </div>
+          <div className="flex items-center justify-between sm:justify-end gap-3">
+            <span className="text-[11px] font-mono text-slate-400 tabular-nums">
+              Showing <strong className="text-slate-200">{filteredNodes.length}</strong> of {nodes.length} nodes
+            </span>
 
-        <div className="flex items-center rounded-lg bg-slate-900 border border-slate-800 p-0.5 text-xs">
-          <button
-            onClick={() => setStatusFilter('all')}
-            className={`px-3 py-1 rounded text-xs font-medium ${
-              statusFilter === 'all' ? 'bg-slate-800 text-white' : 'text-slate-400'
-            }`}
-          >
-            All
-          </button>
-          <button
-            onClick={() => setStatusFilter('enabled')}
-            className={`px-3 py-1 rounded text-xs font-medium ${
-              statusFilter === 'enabled' ? 'bg-slate-800 text-white' : 'text-slate-400'
-            }`}
-          >
-            Active
-          </button>
-          <button
-            onClick={() => setStatusFilter('disabled')}
-            className={`px-3 py-1 rounded text-xs font-medium ${
-              statusFilter === 'disabled' ? 'bg-slate-800 text-white' : 'text-slate-400'
-            }`}
-          >
-            Disabled
-          </button>
-          <button
-            onClick={() => setStatusFilter('updates')}
-            className={`px-3 py-1 rounded text-xs font-medium ${
-              statusFilter === 'updates' ? 'bg-slate-800 text-white' : 'text-slate-400'
-            }`}
-          >
-            Updates
-          </button>
+            <div className="flex items-center rounded-lg bg-slate-950 border border-slate-800 p-0.5 text-xs">
+              <button
+                onClick={() => setStatusFilter('all')}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  statusFilter === 'all' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                All
+              </button>
+              <button
+                onClick={() => setStatusFilter('enabled')}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  statusFilter === 'enabled' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Active
+              </button>
+              <button
+                onClick={() => setStatusFilter('disabled')}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  statusFilter === 'disabled' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Disabled
+              </button>
+              <button
+                onClick={() => setStatusFilter('updates')}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  statusFilter === 'updates' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Updates
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -788,10 +837,26 @@ export function InspectorView({
                             )}
                           </div>
 
-                          <div className="flex items-center gap-2 text-[11px] text-slate-500 font-mono mt-0.5">
+                          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 font-mono mt-0.5">
                             <span>{node.folderName}{!node.enabled ? '.disabled' : ''}</span>
                             <span aria-hidden="true">·</span>
-                            <span>{node.category}</span>
+                            <button
+                              type="button"
+                              onClick={() => setSearchQuery(node.author)}
+                              title={`Filter by author @${node.author}`}
+                              className="text-slate-400 hover:text-indigo-300 transition-colors"
+                            >
+                              @{node.author}
+                            </button>
+                            <span aria-hidden="true">·</span>
+                            <button
+                              type="button"
+                              onClick={() => setCategoryFilter(categoryFilter === node.category ? 'all' : node.category)}
+                              title={`Filter by category ${node.category}`}
+                              className="text-indigo-400/90 hover:text-indigo-300 transition-colors"
+                            >
+                              {node.category}
+                            </button>
                           </div>
                         </div>
                       </td>
