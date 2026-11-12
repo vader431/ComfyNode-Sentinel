@@ -23,6 +23,10 @@ import {
   PieChart,
   X,
   Filter,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Info,
 } from 'lucide-react';
 import { InstalledNode, HealthStatus } from '@/types';
 
@@ -66,6 +70,10 @@ export function InspectorView({
   const [repoLimit, setRepoLimit] = useState<number>(5);
   const [pieMetric, setPieMetric] = useState<'count' | 'size'>('count');
   const [hoveredCategory, setHoveredCategory] = useState<string | null>(null);
+  const [sortField, setSortField] = useState<'name' | 'size' | 'health'>('name');
+  const [sortAsc, setSortAsc] = useState<boolean>(true);
+  const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
+  const [drawerNodeId, setDrawerNodeId] = useState<string | null>(null);
 
   // Categories
   const categories = Array.from(new Set(nodes.map((n) => n.category))).filter(Boolean);
@@ -203,6 +211,58 @@ export function InspectorView({
     }
     return true;
   });
+
+  const sortedNodes = React.useMemo(() => {
+    return [...filteredNodes].sort((a, b) => {
+      let cmp = 0;
+      if (sortField === 'name') {
+        const nameA = aliases[a.folderName] || a.cleanDisplayName;
+        const nameB = aliases[b.folderName] || b.cleanDisplayName;
+        cmp = nameA.localeCompare(nameB);
+      } else if (sortField === 'size') {
+        cmp = (a.sizeMb || 0) - (b.sizeMb || 0);
+      } else if (sortField === 'health') {
+        cmp = a.healthStatus.localeCompare(b.healthStatus);
+      }
+      return sortAsc ? cmp : -cmp;
+    });
+  }, [filteredNodes, sortField, sortAsc, aliases]);
+
+  const handleSort = (field: 'name' | 'size' | 'health') => {
+    if (sortField === field) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortField(field);
+      setSortAsc(true);
+    }
+  };
+
+  const handleToggleSelectAll = () => {
+    if (selectedNodeIds.size === filteredNodes.length) {
+      setSelectedNodeIds(new Set());
+    } else {
+      setSelectedNodeIds(new Set(filteredNodes.map((n) => n.id)));
+    }
+  };
+
+  const handleToggleSelectNode = (id: string) => {
+    setSelectedNodeIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBatchToggleState = (targetEnabled: boolean) => {
+    for (const node of nodes) {
+      if (selectedNodeIds.has(node.id) && node.enabled !== targetEnabled) {
+        onToggleNodeState(node.folderName);
+      }
+    }
+  };
+
+  const drawerNode = nodes.find((n) => n.id === drawerNodeId) || null;
 
   const handleCopyCommit = (commit: string) => {
     navigator.clipboard.writeText(commit);
@@ -749,24 +809,68 @@ export function InspectorView({
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-slate-800/80 bg-slate-950/40 text-xs font-medium text-slate-400">
-                <th className="py-3 px-4 w-12 text-center">State</th>
-                <th className="py-3 px-4">Node / Directory</th>
+                <th className="py-3 px-3 w-8 text-center">
+                  <input
+                    type="checkbox"
+                    checked={filteredNodes.length > 0 && selectedNodeIds.size === filteredNodes.length}
+                    onChange={handleToggleSelectAll}
+                    className="rounded bg-slate-950 border-slate-700 text-indigo-600 focus:ring-0 cursor-pointer"
+                  />
+                </th>
+                <th className="py-3 px-3 w-12 text-center">State</th>
+                <th className="py-3 px-4">
+                  <button
+                    onClick={() => handleSort('name')}
+                    className="flex items-center gap-1.5 hover:text-white transition-colors"
+                  >
+                    <span>Node / Directory</span>
+                    {sortField === 'name' ? (
+                      sortAsc ? <ArrowUp className="w-3 h-3 text-indigo-400" /> : <ArrowDown className="w-3 h-3 text-indigo-400" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 opacity-40" />
+                    )}
+                  </button>
+                </th>
                 <th className="py-3 px-4">Git Repository</th>
                 <th className="py-3 px-4">Commit / Branch</th>
-                <th className="py-3 px-4">Health</th>
-                <th className="py-3 px-4">Size</th>
+                <th className="py-3 px-4">
+                  <button
+                    onClick={() => handleSort('health')}
+                    className="flex items-center gap-1.5 hover:text-white transition-colors"
+                  >
+                    <span>Health</span>
+                    {sortField === 'health' ? (
+                      sortAsc ? <ArrowUp className="w-3 h-3 text-indigo-400" /> : <ArrowDown className="w-3 h-3 text-indigo-400" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 opacity-40" />
+                    )}
+                  </button>
+                </th>
+                <th className="py-3 px-4">
+                  <button
+                    onClick={() => handleSort('size')}
+                    className="flex items-center gap-1.5 hover:text-white transition-colors"
+                  >
+                    <span>Size</span>
+                    {sortField === 'size' ? (
+                      sortAsc ? <ArrowUp className="w-3 h-3 text-indigo-400" /> : <ArrowDown className="w-3 h-3 text-indigo-400" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 opacity-40" />
+                    )}
+                  </button>
+                </th>
                 <th className="py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 text-xs text-slate-300">
-              {filteredNodes.length === 0 ? (
+              {sortedNodes.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-500">
+                  <td colSpan={8} className="py-12 text-center text-slate-500">
                     No custom nodes matched your criteria.
                   </td>
                 </tr>
               ) : (
-                filteredNodes.map((node) => {
+                sortedNodes.map((node) => {
                   const displayName = showCleanNames
                     ? aliases[node.folderName] || node.cleanDisplayName
                     : node.folderName;
@@ -776,10 +880,20 @@ export function InspectorView({
                       key={node.id}
                       className={`hover:bg-slate-800/30 transition-colors ${
                         !node.enabled ? 'opacity-60 bg-slate-950/20' : ''
-                      }`}
+                      } ${selectedNodeIds.has(node.id) ? 'bg-indigo-950/20' : ''}`}
                     >
+                      {/* Row Checkbox */}
+                      <td className="py-3.5 px-3 text-center">
+                        <input
+                          type="checkbox"
+                          checked={selectedNodeIds.has(node.id)}
+                          onChange={() => handleToggleSelectNode(node.id)}
+                          className="rounded bg-slate-950 border-slate-700 text-indigo-600 focus:ring-0 cursor-pointer"
+                        />
+                      </td>
+
                       {/* State Toggle */}
-                      <td className="py-3.5 px-4 text-center">
+                      <td className="py-3.5 px-3 text-center">
                         <button
                           onClick={() => onToggleNodeState(node.folderName)}
                           title={node.enabled ? 'Click to disable' : 'Click to enable'}
@@ -1104,6 +1218,178 @@ export function InspectorView({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Slideover Node Details Drawer */}
+      {drawerNode && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-lg bg-[#070a10] border-l border-slate-800 h-full p-6 overflow-y-auto flex flex-col justify-between shadow-2xl">
+            <div className="space-y-6">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-lg bg-indigo-950/60 border border-indigo-800/60 text-indigo-400">
+                    <Layers className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white tracking-tight">
+                      {aliases[drawerNode.folderName] || drawerNode.cleanDisplayName}
+                    </h3>
+                    <div className="text-[11px] font-mono text-slate-500">
+                      {drawerNode.folderName}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setDrawerNodeId(null)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Quick Status Badges */}
+              <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+                <div className="p-3 rounded-lg bg-slate-900 border border-slate-800">
+                  <div className="text-slate-500 text-[10px] uppercase">State</div>
+                  <div className="mt-1 font-semibold flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${drawerNode.enabled ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-slate-500'}`} />
+                    <span className={drawerNode.enabled ? 'text-emerald-300' : 'text-slate-400'}>
+                      {drawerNode.enabled ? 'Enabled' : 'Disabled'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-lg bg-slate-900 border border-slate-800">
+                  <div className="text-slate-500 text-[10px] uppercase">Health Status</div>
+                  <div className="mt-1 font-semibold">
+                    {drawerNode.healthStatus === 'compliant' && <span className="text-emerald-400">🟢 Compliant</span>}
+                    {drawerNode.healthStatus === 'fragile' && <span className="text-amber-400">🟡 Fragile</span>}
+                    {drawerNode.healthStatus === 'os_locked' && <span className="text-rose-400">🔴 OS-Locked</span>}
+                  </div>
+                </div>
+              </div>
+
+              {/* Description */}
+              <div className="space-y-1.5 text-xs">
+                <span className="font-semibold text-slate-400 uppercase text-[10px] tracking-wider">Description</span>
+                <p className="text-slate-300 leading-relaxed bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                  {drawerNode.description || 'No description provided.'}
+                </p>
+              </div>
+
+              {/* Provided Node Classes */}
+              <div className="space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-400 uppercase text-[10px] tracking-wider">
+                    Node Classes ({drawerNode.providesNodes.length})
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto p-1">
+                  {drawerNode.providesNodes.map((cls, idx) => (
+                    <span
+                      key={idx}
+                      className="px-2 py-0.5 rounded bg-indigo-950/40 border border-indigo-900/40 text-indigo-300 font-mono text-[11px]"
+                    >
+                      {cls}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Git & Storage Metadata */}
+              <div className="space-y-2 p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 text-xs font-mono">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Repository:</span>
+                  <a
+                    href={drawerNode.gitUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 truncate max-w-[220px]"
+                  >
+                    <span>{drawerNode.gitUrl.replace('https://github.com/', '')}</span>
+                    <ExternalLink className="w-3 h-3 shrink-0" />
+                  </a>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Commit:</span>
+                  <span className="text-slate-300">{drawerNode.currentCommit.slice(0, 7)} ({drawerNode.branch || 'main'})</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Disk Footprint:</span>
+                  <span className="text-slate-300">{drawerNode.sizeMb.toFixed(1)} MB ({drawerNode.filesCount} files)</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Category / Author:</span>
+                  <span className="text-slate-300">{drawerNode.category} / @{drawerNode.author}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Drawer Bottom Actions */}
+            <div className="pt-6 border-t border-slate-800 flex items-center gap-3">
+              <button
+                onClick={() => {
+                  onToggleNodeState(drawerNode.folderName);
+                  setDrawerNodeId(null);
+                }}
+                className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-colors ${
+                  drawerNode.enabled
+                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                    : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                }`}
+              >
+                {drawerNode.enabled ? 'Disable Node' : 'Enable Node'}
+              </button>
+
+              <button
+                onClick={() => {
+                  onNavigateToDoctor(drawerNode.id);
+                  setDrawerNodeId(null);
+                }}
+                className="px-3 py-2 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors"
+              >
+                Health Check
+              </button>
+
+              <button
+                onClick={() => {
+                  onUninstallNode(drawerNode.folderName);
+                  setDrawerNodeId(null);
+                }}
+                className="p-2 text-xs font-semibold rounded-lg bg-rose-950/40 border border-rose-900/60 text-rose-400 hover:bg-rose-900/60 transition-colors"
+                title="Quarantine to Trash"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Multi-Select Batch Actions Bar */}
+      {selectedNodeIds.size > 0 && (
+        <div className="fixed bottom-11 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-slate-900/95 border border-indigo-500/50 shadow-2xl backdrop-blur-md text-xs font-mono animate-fade-in">
+          <span className="text-white font-semibold tabular-nums">{selectedNodeIds.size} nodes selected</span>
+          <div className="h-4 w-px bg-slate-700" />
+          <button
+            onClick={() => handleBatchToggleState(true)}
+            className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-sans font-medium transition-colors"
+          >
+            Enable All
+          </button>
+          <button
+            onClick={() => handleBatchToggleState(false)}
+            className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-sans font-medium transition-colors"
+          >
+            Disable All
+          </button>
+          <button
+            onClick={() => setSelectedNodeIds(new Set())}
+            className="text-slate-400 hover:text-slate-200 text-[11px] underline ml-1 cursor-pointer"
+          >
+            Clear
+          </button>
         </div>
       )}
     </div>

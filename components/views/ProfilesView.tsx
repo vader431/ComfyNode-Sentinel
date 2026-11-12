@@ -50,6 +50,7 @@ export function ProfilesView({
   // Workflow drop / inspect state
   const [isDragging, setIsDragging] = useState(false);
   const [inspectionResult, setInspectionResult] = useState<WorkflowInspectionResult | null>(null);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [isParsing, setIsParsing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -71,11 +72,18 @@ export function ProfilesView({
     setIsParsing(true);
     setErrorMessage(null);
     try {
+      if (file.type.startsWith('image/') || file.name.endsWith('.png')) {
+        const url = URL.createObjectURL(file);
+        setPreviewImageUrl(url);
+      } else {
+        setPreviewImageUrl(null);
+      }
       const extracted = await extractWorkflowFromBuffer(file);
       analyzeWorkflowClasses(file.name, file.name.endsWith('.png') ? 'png' : 'json', extracted.nodeTypes);
     } catch (err: unknown) {
       setErrorMessage(err instanceof Error ? err.message : 'Error parsing workflow file.');
       setInspectionResult(null);
+      setPreviewImageUrl(null);
     } finally {
       setIsParsing(false);
     }
@@ -147,6 +155,7 @@ export function ProfilesView({
   };
 
   const handleLoadSampleWorkflow = () => {
+    setPreviewImageUrl(null);
     const sampleClasses = [
       'KSampler',
       'CheckpointLoaderSimple',
@@ -297,6 +306,27 @@ export function ProfilesView({
           {inspectionResult && (
             <div className="space-y-6">
               <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 shadow-sm">
+                {previewImageUrl && (
+                  <div className="mb-4 pb-4 border-b border-slate-800 flex items-center gap-4">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={previewImageUrl}
+                      alt="Workflow Output Preview"
+                      className="w-20 h-20 object-cover rounded-lg border border-slate-700 bg-black/40 shadow-sm shrink-0"
+                    />
+                    <div>
+                      <span className="inline-block px-2 py-0.5 rounded text-[10px] font-semibold tracking-wider uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 mb-1">
+                        Embedded PNG Image Preview
+                      </span>
+                      <p className="text-xs text-slate-300 font-medium">
+                        Decoded from binary PNG metadata ({inspectionResult.fileName})
+                      </p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Embedded ComfyUI node graph parsed from PNG text chunks.
+                      </p>
+                    </div>
+                  </div>
+                )}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
                   <div>
                     <div className="flex items-center gap-2">

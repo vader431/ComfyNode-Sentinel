@@ -14,6 +14,9 @@ import {
   AlertTriangle,
   Flame,
   Layers,
+  Search,
+  X,
+  ArrowRight,
 } from 'lucide-react';
 import { PipQueueItem, TerminalLogEntry } from '@/types';
 
@@ -39,6 +42,7 @@ export function TerminalRunnerView({
   initialCommand,
 }: TerminalRunnerViewProps) {
   const [commandInput, setCommandInput] = useState(initialCommand || '');
+  const [logFilterQuery, setLogFilterQuery] = useState('');
 
   const [isRunning, setIsRunning] = useState(false);
   const [customReqInput, setCustomReqInput] = useState(
@@ -49,10 +53,16 @@ export function TerminalRunnerView({
   const shieldActivePendingItem = pipQueue.find((item) => item.status === 'blocked_by_shield') || null;
   const terminalEndRef = useRef<HTMLDivElement>(null);
 
+  const displayedLogs = React.useMemo(() => {
+    if (!logFilterQuery.trim()) return logs;
+    const q = logFilterQuery.toLowerCase();
+    return logs.filter((l) => l.text.toLowerCase().includes(q) || l.type.toLowerCase().includes(q));
+  }, [logs, logFilterQuery]);
+
   // Auto-scroll logs
   useEffect(() => {
     terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [logs]);
+  }, [displayedLogs]);
 
   const handleRunCommand = () => {
     if (!commandInput.trim() || isRunning) return;
@@ -158,6 +168,51 @@ export function TerminalRunnerView({
                 Overwriting PyTorch in ComfyUI will break your CUDA acceleration and torch xformers runtime!
               </p>
 
+              {/* Split Before / After Diff */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3 text-xs font-mono">
+                <div className="p-3 rounded-lg bg-slate-950/90 border border-slate-800">
+                  <div className="text-[10px] uppercase text-rose-400 font-bold mb-1">
+                    Incoming requirements.txt (Blocked)
+                  </div>
+                  <div className="space-y-1">
+                    {shieldActivePendingItem.requirements.map((req, i) => {
+                      const isRisky = shieldActivePendingItem.strippedTorchPackages.some((p) =>
+                        req.toLowerCase().startsWith(p)
+                      );
+                      return (
+                        <div
+                          key={i}
+                          className={isRisky ? 'text-rose-400 line-through bg-rose-950/40 px-1 rounded' : 'text-slate-400'}
+                        >
+                          {req} {isRisky && '(Strip)'}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-lg bg-slate-950/90 border border-slate-800">
+                  <div className="text-[10px] uppercase text-emerald-400 font-bold mb-1 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                    <span>Sanitized pip install Target</span>
+                  </div>
+                  <div className="space-y-1">
+                    {shieldActivePendingItem.requirements
+                      .filter(
+                        (req) =>
+                          !shieldActivePendingItem.strippedTorchPackages.some((p) =>
+                            req.toLowerCase().startsWith(p)
+                          )
+                      )
+                      .map((req, i) => (
+                        <div key={i} className="text-emerald-300 font-semibold">
+                          ✓ {req}
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              </div>
+
               <div className="flex items-center gap-3 mt-4">
                 <button
                   onClick={() => onResolveShield(shieldActivePendingItem.id, true)}
@@ -195,6 +250,26 @@ export function TerminalRunnerView({
             </div>
 
             <div className="flex items-center gap-2">
+              {/* In-Terminal Search Filter */}
+              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-[11px] font-mono">
+                <Search className="w-3 h-3 text-slate-500" />
+                <input
+                  type="text"
+                  value={logFilterQuery}
+                  onChange={(e) => setLogFilterQuery(e.target.value)}
+                  placeholder="Filter logs..."
+                  className="bg-transparent border-none text-slate-200 placeholder:text-slate-600 focus:outline-none w-24 sm:w-36 text-xs"
+                />
+                {logFilterQuery && (
+                  <button
+                    onClick={() => setLogFilterQuery('')}
+                    className="text-slate-500 hover:text-slate-300"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+
               <button
                 onClick={onClearLogs}
                 className="p-1 text-slate-500 hover:text-slate-300 rounded hover:bg-slate-800 transition-colors"
@@ -207,7 +282,7 @@ export function TerminalRunnerView({
 
           {/* Terminal Output Area */}
           <div className="flex-1 p-4 font-mono text-xs overflow-y-auto space-y-1.5 leading-relaxed selection:bg-indigo-500/30">
-            {logs.map((log) => {
+            {displayedLogs.map((log) => {
               let colorClass = 'text-slate-300';
               if (log.type === 'stderr') colorClass = 'text-rose-400 font-semibold';
               if (log.type === 'shield') colorClass = 'text-amber-400 font-semibold';

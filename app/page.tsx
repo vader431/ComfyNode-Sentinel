@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useSyncExternalStore } from 'react';
 import { Header, ActiveTab } from '@/components/Header';
+import { StatusBar } from '@/components/StatusBar';
 import { ExportModal } from '@/components/ExportModal';
 import { RoadmapView } from '@/components/views/RoadmapView';
 import { InspectorView } from '@/components/views/InspectorView';
@@ -689,10 +690,11 @@ export default function Home() {
         installedCount={nodes.length}
         totalTasksCount={tasks.length}
         completedTasksCount={completedTasks}
+        isTauri={isTauriEnvironment()}
       />
 
       {/* Main Content Viewport */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 pb-14">
         {activeTab === 'roadmap' && (
           <RoadmapView
             tasks={tasks}
@@ -796,6 +798,17 @@ export default function Home() {
         isOpen={showExportModal}
         onClose={() => setShowExportModal(false)}
         tasks={tasks}
+      />
+
+      {/* Persistent Studio Status Bar */}
+      <StatusBar
+        comfyRoot={settings.comfyRoot}
+        activeProfileName={profiles.find((p) => p.id === activeProfileId)?.name || 'Default'}
+        pipQueue={pipQueue}
+        isTauri={isTauriEnvironment()}
+        onNavigateToSettings={() => setActiveTab('settings')}
+        onNavigateToRunner={() => setActiveTab('runner')}
+        onNavigateToProfiles={() => setActiveTab('profiles')}
       />
     </div>
   );
