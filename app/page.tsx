@@ -52,7 +52,7 @@ export default function Home() {
     () => false
   );
 
-  const [activeTab, setActiveTab] = useState<ActiveTab>('roadmap');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('inspector');
   const [showExportModal, setShowExportModal] = useState(false);
   const [targetRunnerCommand, setTargetRunnerCommand] = useState<string>('');
 

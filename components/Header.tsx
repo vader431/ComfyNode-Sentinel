@@ -2,7 +2,6 @@
 
 import React from 'react';
 import {
-  ListTodo,
   Layers,
   Terminal,
   Globe,
@@ -32,8 +31,8 @@ interface HeaderProps {
   setActiveTab: (tab: ActiveTab) => void;
   onOpenExportModal: () => void;
   installedCount: number;
-  totalTasksCount: number;
-  completedTasksCount: number;
+  totalTasksCount?: number;
+  completedTasksCount?: number;
   isTauri?: boolean;
 }
 
@@ -42,30 +41,25 @@ export function Header({
   setActiveTab,
   onOpenExportModal,
   installedCount,
-  totalTasksCount,
-  completedTasksCount,
   isTauri,
 }: HeaderProps) {
   const navItems: { id: ActiveTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-    { id: 'roadmap', label: 'Roadmap', icon: ListTodo },
-    { id: 'inspector', label: 'Inspector', icon: Layers },
-    { id: 'runner', label: 'Runner & Shield', icon: Terminal },
+    { id: 'inspector', label: 'Nodes', icon: Layers },
     { id: 'registry', label: 'Registry', icon: Globe },
-    { id: 'lockfile', label: 'Lockfile', icon: FileCode2 },
     { id: 'doctor', label: 'Health Doctor', icon: Stethoscope },
     { id: 'profiles', label: 'Workflows', icon: Workflow },
     { id: 'models', label: 'Models & VRAM', icon: HardDrive },
-    { id: 'settings', label: 'Settings', icon: Settings },
-    { id: 'docs', label: 'Docs', icon: BookOpen },
+    { id: 'lockfile', label: 'Lockfile & Cloud', icon: FileCode2 },
+    { id: 'runner', label: 'Terminal', icon: Terminal },
   ];
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-slate-800/80 bg-[#070a10]/95 backdrop-blur-md">
-      <div className="flex h-15 w-full items-center justify-between gap-4 px-6">
+      <div className="flex h-14 w-full items-center justify-between gap-4 px-6">
         {/* Zone 1: Wordmark brand title & Runtime Badge */}
         <div className="flex items-center gap-3 shrink-0">
           <button
-            onClick={() => setActiveTab('roadmap')}
+            onClick={() => setActiveTab('inspector')}
             className="flex items-center gap-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 rounded"
           >
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-600/20 border border-indigo-500/40 text-indigo-400 font-mono font-bold text-xs shadow-[0_0_12px_rgba(99,102,241,0.25)]">
@@ -90,7 +84,7 @@ export function Header({
           </div>
         </div>
 
-        {/* Zone 2: Navigation Links, streamlined single-line text links */}
+        {/* Zone 2: Focused Core Navigation Links */}
         <nav className="flex items-center gap-1 text-sm overflow-x-auto py-1 scrollbar-none">
           {navItems.map((item) => {
             const isActive = activeTab === item.id;
@@ -99,22 +93,17 @@ export function Header({
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap shrink-0 transition-all ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap shrink-0 transition-all ${
                   isActive
-                    ? 'bg-slate-800/90 text-white shadow-sm border border-slate-700/80'
+                    ? 'bg-slate-800 text-white shadow-sm border border-slate-700/80'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
                 }`}
               >
                 <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-indigo-400' : 'text-slate-500'}`} />
                 <span>{item.label}</span>
-                {item.id === 'roadmap' && (
-                  <span className="text-[10px] text-slate-400 font-mono ml-0.5">
-                    ({completedTasksCount}/{totalTasksCount})
-                  </span>
-                )}
                 {item.id === 'inspector' && (
-                  <span className="text-[10px] text-slate-400 font-mono ml-0.5">
-                    ({installedCount})
+                  <span className="text-[10px] text-indigo-300 font-mono ml-0.5 px-1.5 py-0.2 rounded bg-indigo-500/10 border border-indigo-500/20">
+                    {installedCount}
                   </span>
                 )}
               </button>
@@ -122,14 +111,39 @@ export function Header({
           })}
         </nav>
 
-        {/* Zone 3: 1 Primary Action */}
-        <div className="flex items-center gap-3 shrink-0">
+        {/* Zone 3: Utility Actions (Docs, Settings, Export) */}
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => setActiveTab('docs')}
+            title="Documentation, Rules & Changelog"
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors border ${
+              activeTab === 'docs'
+                ? 'bg-slate-800 text-white border-slate-700'
+                : 'text-slate-400 hover:text-white bg-slate-900/60 hover:bg-slate-800 border-slate-800'
+            }`}
+          >
+            <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
+            <span className="hidden md:inline">Docs</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('settings')}
+            title="Environment Settings"
+            className={`p-1.5 text-xs font-medium rounded-lg transition-colors border ${
+              activeTab === 'settings'
+                ? 'bg-slate-800 text-white border-slate-700'
+                : 'text-slate-400 hover:text-white bg-slate-900/60 hover:bg-slate-800 border-slate-800'
+            }`}
+          >
+            <Settings className="w-4 h-4" />
+          </button>
+
           <button
             onClick={onOpenExportModal}
-            className="flex items-center gap-2 px-3.5 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 rounded-lg transition-colors shadow-sm whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 rounded-lg transition-colors shadow-sm whitespace-nowrap shrink-0"
           >
             <Share2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Export Roadmap</span>
+            <span className="hidden sm:inline">Export</span>
           </button>
         </div>
       </div>
