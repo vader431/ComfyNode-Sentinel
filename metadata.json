@@ -1,0 +1,6 @@
+{
+  "name": "ComfyNode Sentinel - ComfyUI Node Manager & Studio",
+  "description": "Production-grade desktop companion and custom node manager for ComfyUI. Features offline inspector, Torch Shield pip runner, lockfile sync, workflow pre-flight inspector, health doctor linter, and roadmap issue exporter.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
