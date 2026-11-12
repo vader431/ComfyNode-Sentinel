@@ -77,3 +77,4 @@ describe('conflict-detector', () => {
     expect(conflicts).toHaveLength(0);
   });
 });
+

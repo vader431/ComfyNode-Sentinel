@@ -3,6 +3,7 @@ import {
   generateComfyLockfile,
   exportAsPlainUrls,
   calculateReconciliation,
+  generateCloudPodBootstrapScript,
 } from '@/lib/lockfile';
 import { InstalledNode, ComfyLockfile } from '@/types';
 
@@ -107,6 +108,22 @@ describe('lockfile', () => {
 
     const toggleItem = recon.items.find((i) => i.action === 'toggle_state');
     expect(toggleItem?.name).toBe('ComfyUI-Manager');
+  });
+
+  it('generates a valid Cloud Pod bootstrap script with Torch Shield filtering', () => {
+    const lockfile = generateComfyLockfile(mockNodes);
+    const script = generateCloudPodBootstrapScript(lockfile, {
+      targetDir: '/workspace/ComfyUI',
+      port: 8188,
+    });
+
+    expect(script).toContain('#!/usr/bin/env bash');
+    expect(script).toContain('TARGET_DIR="/workspace/ComfyUI"');
+    expect(script).toContain('git clone "https://github.com/ltdrdata/ComfyUI-Impact-Pack.git"');
+    expect(script).toContain('git checkout -q "4f2b10a1234567890abcdef"');
+    expect(script).toContain('grep -v -E \'^(torch|torchvision|torchaudio|xformers)');
+    expect(script).toContain('mv "custom_nodes/ComfyUI-Manager" "custom_nodes/ComfyUI-Manager.disabled"');
+    expect(script).toContain('python3 main.py --listen 0.0.0.0 --port 8188');
   });
 });
 

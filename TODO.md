@@ -50,12 +50,16 @@
 
 ## Upcoming Backlog (Phase 8: Post-1.0 Enhancements)
 
+- [x] **Native Tauri Desktop Bridge Integration**:
+  - [x] Wire Rust atomic state toggling (`Folder.disabled`), trash soft-quarantine, and directory validation to frontend state.
+- [x] **Conflict Matrix Detector**:
+  - [x] Cross-compare Python package version constraints (e.g., `numpy<2.0` vs `numpy>=2.0`, `opencv-python` vs `opencv-python-headless`) across all enabled custom nodes simultaneously.
+  - [x] Integrate interactive matrix switcher and resolution cards into the Health Doctor view.
+- [x] **Cloud Pod Sync (RunPod / Vast.ai / Modal)**:
+  - [x] Generate idempotent `bootstrap.sh` provisioner script from `comfy-lock.json` with headless Torch Shield protection.
+  - [x] Add Cloud Pod tab to Lockfile view with 1-click script download and bash 1-liner copy.
 - [ ] **Model Checkpoint & LoRA Symlink Manager**:
   - [ ] Scan `models/checkpoints/`, `models/loras/`, and `models/controlnet/` for orphaned or duplicate safetensors files.
   - [ ] Estimate VRAM requirements per workflow before launching ComfyUI.
 - [ ] **Automated Git Bisect Assistant for Broken Updates**:
   - [ ] Allow 1-click rollback to the previous working commit hash stored in local transaction history when an upstream node update fails at runtime.
-- [ ] **Cloud Pod Sync (RunPod / Vast.ai / Modal)**:
-  - [ ] Generate a single curl-able bootstrap script from `comfy-lock.json` for headless Linux GPU containers.
-- [ ] **Conflict Matrix Detector**:
-  - [ ] Cross-compare Python package version constraints (e.g., `numpy<2.0` vs `numpy>=2.0`, `opencv-python` vs `opencv-python-headless`) across all enabled custom nodes simultaneously.
