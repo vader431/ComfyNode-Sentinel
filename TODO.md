@@ -58,6 +58,13 @@
 - [x] **Cloud Pod Sync (RunPod / Vast.ai / Modal)**:
   - [x] Generate idempotent `bootstrap.sh` provisioner script from `comfy-lock.json` with headless Torch Shield protection.
   - [x] Add Cloud Pod tab to Lockfile view with 1-click script download and bash 1-liner copy.
+
+- [x] **Studio UI & UX Overhaul**:
+  - [x] Build persistent bottom Studio `StatusBar` with real-time ComfyUI path, active profile, Tauri/Web bridge indicator, and error tally.
+  - [x] Modernize `Header` with streamlined responsive badges and active runtime indicators.
+  - [x] Upgrade `InspectorView` with multi-select batch toggling/quarantine, column header sorting, and slide-over Node Details Drawer.
+  - [x] Enhance `TerminalRunnerView` with in-terminal live log search filter and split before/after Torch Shield diff visualizer.
+  - [x] Upgrade `ProfilesView` with binary PNG output thumbnail preview and workflow extraction card.
 - [ ] **Model Checkpoint & LoRA Symlink Manager**:
   - [ ] Scan `models/checkpoints/`, `models/loras/`, and `models/controlnet/` for orphaned or duplicate safetensors files.
   - [ ] Estimate VRAM requirements per workflow before launching ComfyUI.
