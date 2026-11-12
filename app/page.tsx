@@ -660,6 +660,7 @@ export default function Home() {
 
         {activeTab === 'runner' && (
           <TerminalRunnerView
+            key={targetRunnerCommand}
             logs={logs}
             pipQueue={pipQueue}
             onAddLog={addLog}

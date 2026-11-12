@@ -39,11 +39,6 @@ export function TerminalRunnerView({
   initialCommand,
 }: TerminalRunnerViewProps) {
   const [commandInput, setCommandInput] = useState(initialCommand || '');
-  const [prevInitialCommand, setPrevInitialCommand] = useState(initialCommand);
-  if (initialCommand && initialCommand !== prevInitialCommand) {
-    setPrevInitialCommand(initialCommand);
-    setCommandInput(initialCommand);
-  }
 
   const [isRunning, setIsRunning] = useState(false);
   const [customReqInput, setCustomReqInput] = useState(

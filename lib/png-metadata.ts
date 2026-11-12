@@ -48,15 +48,12 @@ export async function extractWorkflowFromBuffer(
 
     let offset = 8;
     const textDecoder = new TextDecoder('utf-8');
+    const dataView = new DataView(buffer);
 
     while (offset < bytes.length) {
       if (offset + 8 > bytes.length) break;
 
-      const length =
-        (bytes[offset] << 24) |
-        (bytes[offset + 1] << 16) |
-        (bytes[offset + 2] << 8) |
-        bytes[offset + 3];
+      const length = dataView.getUint32(offset);
 
       const type = String.fromCharCode(
         bytes[offset + 4],

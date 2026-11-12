@@ -96,7 +96,11 @@ export const StorageService = {
       text: 'Torch Shield activated: PyTorch overwrite protection active (Strict Mode).',
     },
   ]),
-  setLogs: (logs: TerminalLogEntry[]): void => setStoredItem(STORAGE_KEYS.LOGS, logs),
+  setLogs: (logs: TerminalLogEntry[]): void => {
+    // Keep at most 200 recent log lines to prevent localStorage exhaustion
+    const capped = logs.length > 200 ? logs.slice(-200) : logs;
+    setStoredItem(STORAGE_KEYS.LOGS, capped);
+  },
 
   getPipQueue: (): PipQueueItem[] => getStoredItem(STORAGE_KEYS.PIP_QUEUE, []),
   setPipQueue: (queue: PipQueueItem[]): void => setStoredItem(STORAGE_KEYS.PIP_QUEUE, queue),
