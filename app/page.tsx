@@ -14,6 +14,13 @@ import { SettingsView } from '@/components/views/SettingsView';
 import { DocsView } from '@/components/views/DocsView';
 import { StorageService } from '@/lib/storage';
 import {
+  isTauriEnvironment,
+  nativeCheckEnvironment,
+  nativeToggleNodeState,
+  nativeQuarantineNodeToTrash,
+  nativeScanCustomNodes,
+} from '@/lib/tauri-bridge';
+import {
   RoadmapTask,
   InstalledNode,
   WorkspaceProfile,
@@ -53,6 +60,23 @@ export default function Home() {
   const [logs, setLogs] = useState<TerminalLogEntry[]>(() => StorageService.getLogs());
   const [pipQueue, setPipQueue] = useState<PipQueueItem[]>(() => StorageService.getPipQueue());
 
+  const addLog = (entry: Omit<TerminalLogEntry, 'id'>) => {
+    const newEntry: TerminalLogEntry = {
+      id: `log-${Date.now()}-${Math.random()}`,
+      ...entry,
+    };
+    setLogs((prev) => {
+      const updated = [...prev, newEntry];
+      StorageService.setLogs(updated);
+      return updated;
+    });
+  };
+
+  const clearLogs = () => {
+    setLogs([]);
+    StorageService.setLogs([]);
+  };
+
   // Save changes to storage
   const updateTasks = (newTasks: RoadmapTask[]) => {
     setTasks(newTasks);
@@ -89,22 +113,22 @@ export default function Home() {
     StorageService.setSettings(newSettings);
   };
 
-  const addLog = (entry: Omit<TerminalLogEntry, 'id'>) => {
-    const newEntry: TerminalLogEntry = {
-      id: `log-${Date.now()}-${Math.random()}`,
-      ...entry,
-    };
-    setLogs((prev) => {
-      const updated = [...prev, newEntry];
-      StorageService.setLogs(updated);
-      return updated;
-    });
-  };
-
-  const clearLogs = () => {
-    setLogs([]);
-    StorageService.setLogs([]);
-  };
+  // Tauri live environment scanner on startup
+  useEffect(() => {
+    if (!isClient) return;
+    if (isTauriEnvironment() && settings.comfyRoot) {
+      const customNodesPath = `${settings.comfyRoot}\\custom_nodes`;
+      nativeScanCustomNodes(customNodesPath).then((discovered) => {
+        if (discovered && discovered.length > 0) {
+          addLog({
+            timestamp: new Date().toLocaleTimeString(),
+            type: 'info',
+            text: `[Tauri Desktop Shell] Scanned ${discovered.length} live custom_nodes from ${customNodesPath}.`,
+          });
+        }
+      });
+    }
+  }, [isClient, settings.comfyRoot]);
 
   // Task handlers
   const handleToggleTask = (taskId: string) => {
@@ -118,7 +142,19 @@ export default function Home() {
   };
 
   // Node Inspector Handlers
-  const handleToggleNodeState = (folderName: string) => {
+  const handleToggleNodeState = async (folderName: string) => {
+    if (isTauriEnvironment() && settings.comfyRoot) {
+      const customNodesPath = `${settings.comfyRoot}\\custom_nodes`;
+      const renamed = await nativeToggleNodeState(customNodesPath, folderName);
+      if (renamed) {
+        addLog({
+          timestamp: new Date().toLocaleTimeString(),
+          type: 'success',
+          text: `[Tauri Native] Renamed directory on disk to ${renamed}`,
+        });
+      }
+    }
+
     const updated = nodes.map((n) => {
       if (n.folderName === folderName) {
         const nextState = !n.enabled;
@@ -136,9 +172,21 @@ export default function Home() {
     updateNodes(updated);
   };
 
-  const handleUninstallNode = (folderName: string) => {
+  const handleUninstallNode = async (folderName: string) => {
     const target = nodes.find((n) => n.folderName === folderName);
     if (!target) return;
+
+    if (isTauriEnvironment() && settings.comfyRoot) {
+      const customNodesPath = `${settings.comfyRoot}\\custom_nodes`;
+      const trashed = await nativeQuarantineNodeToTrash(customNodesPath, folderName);
+      if (trashed) {
+        addLog({
+          timestamp: new Date().toLocaleTimeString(),
+          type: 'success',
+          text: `[Tauri Native Trash] custom_nodes/${folderName} moved to OS Recycle Bin.`,
+        });
+      }
+    }
 
     const remainingNodes = nodes.filter((n) => n.folderName !== folderName);
     const newTrash = [target, ...trashNodes];
@@ -151,6 +199,24 @@ export default function Home() {
       type: 'warn',
       text: `[Safe Uninstall (trash)] Moved custom_nodes/${folderName} to system trash quarantine.`,
     });
+  };
+
+  const handleUpdateSettings = async (newSettings: EnvironmentSettings) => {
+    const validated = { ...newSettings };
+    if (isTauriEnvironment() && newSettings.comfyRoot) {
+      const check = await nativeCheckEnvironment(newSettings.comfyRoot);
+      if (check) {
+        validated.isValidRoot = check.is_valid;
+        validated.hasMainPy = check.has_main_py;
+        validated.hasCustomNodes = check.has_custom_nodes;
+        addLog({
+          timestamp: new Date().toLocaleTimeString(),
+          type: check.is_valid ? 'success' : 'warn',
+          text: `[Tauri Native Validation] ${newSettings.comfyRoot} - valid root: ${check.is_valid}`,
+        });
+      }
+    }
+    updateSettings(validated);
   };
 
   const handleRestoreNode = (folderName: string) => {
@@ -711,7 +777,7 @@ export default function Home() {
         {activeTab === 'settings' && (
           <SettingsView
             settings={settings}
-            onUpdateSettings={updateSettings}
+            onUpdateSettings={handleUpdateSettings}
             onResetAllData={handleResetAllData}
           />
         )}

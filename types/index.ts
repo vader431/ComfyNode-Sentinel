@@ -152,3 +152,23 @@ export interface EnvironmentSettings {
   showCleanNames: boolean;
   autoTorchShield: boolean;
 }
+
+export interface DependencyRequirement {
+  nodeFolderName: string;
+  rawRequirement: string;
+  packageName: string;
+  comparator?: string;
+  version?: string;
+}
+
+export interface DependencyConflict {
+  id: string;
+  packageName: string;
+  severity: 'critical' | 'warning';
+  nodesInvolved: {
+    folderName: string;
+    requirement: string;
+  }[];
+  description: string;
+  recommendedResolution: string;
+}
