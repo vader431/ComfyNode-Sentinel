@@ -10,8 +10,9 @@ import {
   Workflow,
   HardDrive,
   Settings,
-  Share2,
   BookOpen,
+  Play,
+  RotateCw,
 } from 'lucide-react';
 
 export type ActiveTab =
@@ -29,28 +30,28 @@ export type ActiveTab =
 interface HeaderProps {
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
-  onOpenExportModal: () => void;
   installedCount: number;
-  totalTasksCount?: number;
-  completedTasksCount?: number;
   isTauri?: boolean;
+  onRefreshNodes?: () => void;
+  onLaunchComfyUI?: () => void;
 }
 
 export function Header({
   activeTab,
   setActiveTab,
-  onOpenExportModal,
   installedCount,
   isTauri,
+  onRefreshNodes,
+  onLaunchComfyUI,
 }: HeaderProps) {
   const navItems: { id: ActiveTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-    { id: 'inspector', label: 'Nodes', icon: Layers },
-    { id: 'registry', label: 'Registry', icon: Globe },
+    { id: 'inspector', label: 'Installed Nodes', icon: Layers },
+    { id: 'registry', label: 'Install Nodes', icon: Globe },
+    { id: 'profiles', label: 'Missing Nodes', icon: Workflow },
     { id: 'doctor', label: 'Health Doctor', icon: Stethoscope },
-    { id: 'profiles', label: 'Workflows', icon: Workflow },
     { id: 'models', label: 'Models & VRAM', icon: HardDrive },
-    { id: 'lockfile', label: 'Lockfile & Cloud', icon: FileCode2 },
-    { id: 'runner', label: 'Terminal', icon: Terminal },
+    { id: 'lockfile', label: 'Sync & Backup', icon: FileCode2 },
+    { id: 'runner', label: 'Console', icon: Terminal },
   ];
 
   return (
@@ -65,21 +66,24 @@ export function Header({
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-600/20 border border-indigo-500/40 text-indigo-400 font-mono font-bold text-xs shadow-[0_0_12px_rgba(99,102,241,0.25)]">
               CS
             </div>
-            <span className="text-sm font-semibold tracking-tight text-white whitespace-nowrap">
-              ComfyNode Sentinel
-            </span>
+            <div>
+              <span className="text-sm font-semibold tracking-tight text-white whitespace-nowrap block leading-tight">
+                ComfyNode Sentinel
+              </span>
+              <span className="text-[10px] text-slate-500 font-mono block leading-none">
+                Standalone Custom Nodes Manager
+              </span>
+            </div>
           </button>
 
-          <div className="hidden xl:flex items-center gap-2 text-[11px] text-slate-500 font-mono">
-            <span>Studio v2.1</span>
-            <span aria-hidden="true">·</span>
+          <div className="hidden xl:flex items-center gap-2 text-[11px] text-slate-500 font-mono ml-2 pl-3 border-l border-slate-800">
             {isTauri ? (
-              <span className="text-emerald-400 font-semibold flex items-center gap-1">
+              <span className="text-emerald-400 font-semibold flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span>Tauri Shell</span>
+                <span>Desktop Native</span>
               </span>
             ) : (
-              <span className="text-slate-400">Web Console</span>
+              <span className="text-slate-400">Web Dashboard</span>
             )}
           </div>
         </div>
@@ -111,24 +115,32 @@ export function Header({
           })}
         </nav>
 
-        {/* Zone 3: Utility Actions (Docs, Settings, Export) */}
+        {/* Zone 3: Manager Utility Actions */}
         <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={() => setActiveTab('docs')}
-            title="Documentation, Rules & Changelog"
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors border ${
-              activeTab === 'docs'
-                ? 'bg-slate-800 text-white border-slate-700'
-                : 'text-slate-400 hover:text-white bg-slate-900/60 hover:bg-slate-800 border-slate-800'
-            }`}
-          >
-            <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
-            <span className="hidden md:inline">Docs</span>
-          </button>
+          {onRefreshNodes && (
+            <button
+              onClick={onRefreshNodes}
+              title="Rescan custom_nodes directory"
+              className="p-1.5 text-xs font-medium text-slate-400 hover:text-white bg-slate-900/60 hover:bg-slate-800 rounded-lg transition-colors border border-slate-800"
+            >
+              <RotateCw className="w-4 h-4" />
+            </button>
+          )}
+
+          {onLaunchComfyUI && (
+            <button
+              onClick={onLaunchComfyUI}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 rounded-lg transition-colors shadow-sm whitespace-nowrap shrink-0"
+              title="Launch ComfyUI in Terminal Console"
+            >
+              <Play className="w-3.5 h-3.5 fill-current" />
+              <span className="hidden sm:inline">Launch ComfyUI</span>
+            </button>
+          )}
 
           <button
             onClick={() => setActiveTab('settings')}
-            title="Environment Settings"
+            title="Environment & Binary Settings"
             className={`p-1.5 text-xs font-medium rounded-lg transition-colors border ${
               activeTab === 'settings'
                 ? 'bg-slate-800 text-white border-slate-700'
@@ -139,11 +151,15 @@ export function Header({
           </button>
 
           <button
-            onClick={onOpenExportModal}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 rounded-lg transition-colors shadow-sm whitespace-nowrap shrink-0"
+            onClick={() => setActiveTab('docs')}
+            title="Help, Documentation & Roadmap"
+            className={`p-1.5 text-xs font-medium rounded-lg transition-colors border ${
+              activeTab === 'docs'
+                ? 'bg-slate-800 text-white border-slate-700'
+                : 'text-slate-400 hover:text-white bg-slate-900/60 hover:bg-slate-800 border-slate-800'
+            }`}
           >
-            <Share2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Export</span>
+            <BookOpen className="w-4 h-4" />
           </button>
         </div>
       </div>

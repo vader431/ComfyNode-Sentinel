@@ -727,6 +727,53 @@ export default function Home() {
     setPipQueue(StorageService.getPipQueue());
   };
 
+  const handleRefreshNodes = async () => {
+    addLog({
+      timestamp: new Date().toLocaleTimeString(),
+      type: 'info',
+      text: '[Sentinel] Scanning custom_nodes directory for updates and local changes...',
+    });
+
+    if (isTauriEnvironment() && settings.comfyRoot) {
+      const customNodesPath = `${settings.comfyRoot}\\custom_nodes`;
+      const res = await nativeScanCustomNodes(customNodesPath);
+      if (res && res.length > 0) {
+        addLog({
+          timestamp: new Date().toLocaleTimeString(),
+          type: 'success',
+          text: `[Desktop Bridge] Discovered ${res.length} custom node directories from filesystem.`,
+        });
+      }
+    } else {
+      const refreshed = StorageService.getNodes();
+      setNodes(refreshed);
+      addLog({
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'success',
+        text: `[Sentinel] Loaded ${refreshed.length} custom nodes from local inventory.`,
+      });
+    }
+  };
+
+  const handleLaunchComfyUI = () => {
+    const pythonCmd = settings.pythonBinary || 'python';
+    const launchCommand = `${pythonCmd} main.py --listen 127.0.0.1 --port 8188`;
+
+    addLog({
+      timestamp: new Date().toLocaleTimeString(),
+      type: 'info',
+      text: `[ComfyUI Daemon] Launching ComfyUI server...`,
+    });
+    addLog({
+      timestamp: new Date().toLocaleTimeString(),
+      type: 'stdout',
+      text: `$ ${launchCommand}`,
+    });
+
+    setTargetRunnerCommand(launchCommand);
+    setActiveTab('runner');
+  };
+
   if (!isClient) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#0b0f17] text-slate-400 font-mono text-xs">
@@ -735,19 +782,16 @@ export default function Home() {
     );
   }
 
-  const completedTasks = tasks.filter((t) => t.completed).length;
-
   return (
     <div className="min-h-screen flex flex-col bg-[#0b0f17] text-slate-100">
       {/* Top Bar Contract (Wordmark, single-line links, 1 primary action) */}
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        onOpenExportModal={() => setShowExportModal(true)}
         installedCount={nodes.length}
-        totalTasksCount={tasks.length}
-        completedTasksCount={completedTasks}
         isTauri={isTauriEnvironment()}
+        onRefreshNodes={handleRefreshNodes}
+        onLaunchComfyUI={handleLaunchComfyUI}
       />
 
       {/* Main Content Viewport */}
