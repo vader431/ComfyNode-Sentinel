@@ -177,3 +177,42 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while building tauri application");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_check_environment_nonexistent() {
+        let res = check_environment("C:\\NonExistentPath_Test_12345".to_string()).unwrap();
+        assert!(!res.is_valid);
+        assert!(!res.has_main_py);
+        assert!(!res.has_custom_nodes);
+        assert!(res.error_message.is_some());
+    }
+
+    #[test]
+    fn test_toggle_node_state_cycle() {
+        let temp_dir = std::env::temp_dir().join(format!("sentinel_test_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        let node_dir = temp_dir.join("test_custom_node");
+        fs::create_dir_all(&node_dir).unwrap();
+
+        // 1. Toggle to disabled
+        let target1 = toggle_node_state(temp_dir.to_string_lossy().to_string(), "test_custom_node".to_string()).unwrap();
+        assert_eq!(target1, "test_custom_node.disabled");
+        assert!(temp_dir.join("test_custom_node.disabled").exists());
+        assert!(!temp_dir.join("test_custom_node").exists());
+
+        // 2. Toggle back to enabled
+        let target2 = toggle_node_state(temp_dir.to_string_lossy().to_string(), "test_custom_node.disabled".to_string()).unwrap();
+        assert_eq!(target2, "test_custom_node");
+        assert!(temp_dir.join("test_custom_node").exists());
+        assert!(!temp_dir.join("test_custom_node.disabled").exists());
+
+        // Cleanup
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+}
