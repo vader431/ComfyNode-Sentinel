@@ -65,8 +65,8 @@
   - [x] Upgrade `InspectorView` with multi-select batch toggling/quarantine, column header sorting, and slide-over Node Details Drawer.
   - [x] Enhance `TerminalRunnerView` with in-terminal live log search filter and split before/after Torch Shield diff visualizer.
   - [x] Upgrade `ProfilesView` with binary PNG output thumbnail preview and workflow extraction card.
-- [ ] **Model Checkpoint & LoRA Symlink Manager**:
-  - [ ] Scan `models/checkpoints/`, `models/loras/`, and `models/controlnet/` for orphaned or duplicate safetensors files.
-  - [ ] Estimate VRAM requirements per workflow before launching ComfyUI.
-- [ ] **Automated Git Bisect Assistant for Broken Updates**:
-  - [ ] Allow 1-click rollback to the previous working commit hash stored in local transaction history when an upstream node update fails at runtime.
+- [x] **Model Checkpoint & LoRA Symlink Manager**:
+  - [x] Scan `models/checkpoints/`, `models/loras/`, and `models/controlnet/` for orphaned or duplicate safetensors files.
+  - [x] Estimate VRAM requirements per workflow before launching ComfyUI.
+- [x] **Automated Git Bisect Assistant for Broken Updates**:
+  - [x] Allow 1-click rollback to the previous working commit hash stored in local transaction history when an upstream node update fails at runtime.

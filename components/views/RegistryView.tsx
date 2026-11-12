@@ -14,31 +14,41 @@ import {
   ShieldCheck,
   Flame,
   CheckCircle2,
+  History,
+  Undo2,
+  Copy,
 } from 'lucide-react';
-import { RegistryNode, InstalledNode } from '@/types';
+import { RegistryNode, InstalledNode, UpdateTransaction } from '@/types';
 import { COMMUNITY_REGISTRY } from '@/lib/default-data';
+import { generateGitBisectScript } from '@/lib/transaction-history';
 
 interface RegistryViewProps {
   installedNodes: InstalledNode[];
+  transactions?: UpdateTransaction[];
   onInstallFromRegistry: (regNode: RegistryNode) => void;
   onInstallViaGitUrl: (url: string, branch?: string, folderName?: string) => void;
   onBatchUrlImport: (urls: string[]) => void;
   onCheckUpdates: () => void;
   onUpdateAll: () => void;
+  onRollbackTransaction?: (id: string) => void;
 }
 
 export function RegistryView({
   installedNodes,
+  transactions = [],
   onInstallFromRegistry,
   onInstallViaGitUrl,
   onBatchUrlImport,
   onCheckUpdates,
   onUpdateAll,
+  onRollbackTransaction,
 }: RegistryViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [showUrlModal, setShowUrlModal] = useState(false);
   const [showBatchModal, setShowBatchModal] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [copiedBisectId, setCopiedBisectId] = useState<string | null>(null);
 
   // Direct Git URL modal state
   const [directUrl, setDirectUrl] = useState('');
@@ -130,6 +140,14 @@ export function RegistryView({
             >
               <FileText className="w-3.5 h-3.5" />
               <span>Batch URL Import</span>
+            </button>
+
+            <button
+              onClick={() => setShowHistoryModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-300 hover:text-white bg-amber-950/40 hover:bg-amber-900/60 border border-amber-800/60 rounded-lg transition-colors"
+            >
+              <History className="w-3.5 h-3.5" />
+              <span>Rollback History ({transactions.length})</span>
             </button>
 
             <button
@@ -375,6 +393,117 @@ export function RegistryView({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Update Transaction History & Rollback Modal */}
+      {showHistoryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-4 max-h-[85vh] flex flex-col">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                  <History className="w-5 h-5 text-amber-400" />
+                  <span>Update Transaction History & Rollback Assistant</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Immutable audit log of all upstream updates. If an update introduces a breaking change or startup traceback, roll back immediately with 1 click.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowHistoryModal(false)}
+                className="text-slate-500 hover:text-white text-xs px-2 py-1"
+              >
+                ✕ Close
+              </button>
+            </div>
+
+            <div className="overflow-y-auto space-y-3 flex-1 pr-1">
+              {transactions.length === 0 ? (
+                <div className="text-center py-8 text-xs text-slate-500">
+                  No update transactions recorded yet.
+                </div>
+              ) : (
+                transactions.map((tx) => (
+                  <div
+                    key={tx.id}
+                    className="p-4 rounded-lg border border-slate-800 bg-slate-950/60 space-y-3"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <span className="text-xs font-bold text-white font-mono">
+                          {tx.nodeDisplayName}
+                        </span>
+                        <span className="text-[11px] text-slate-500 font-mono ml-2">
+                          ({tx.nodeFolderName})
+                        </span>
+                        <div className="text-[11px] text-slate-400 font-mono mt-0.5">
+                          Commit: <span className="text-slate-300">{tx.previousCommit}</span> →{' '}
+                          <span className="text-indigo-400">{tx.targetCommit}</span> ·{' '}
+                          <span>{new Date(tx.timestamp).toLocaleString()}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {tx.status === 'rolled_back' ? (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                            Rolled Back
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            Active HEAD
+                          </span>
+                        )}
+
+                        <button
+                          onClick={() => {
+                            const script = generateGitBisectScript(
+                              tx.nodeFolderName,
+                              tx.previousCommit,
+                              tx.targetCommit
+                            );
+                            navigator.clipboard.writeText(script);
+                            setCopiedBisectId(tx.id);
+                            setTimeout(() => setCopiedBisectId(null), 2000);
+                          }}
+                          className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded border border-slate-700 transition-colors"
+                          title="Copy Git Bisect bash script to debug breaking commit range"
+                        >
+                          <Copy className="w-3 h-3" />
+                          <span>{copiedBisectId === tx.id ? 'Copied Bisect!' : 'Bisect Script'}</span>
+                        </button>
+
+                        {onRollbackTransaction && (
+                          <button
+                            disabled={tx.status === 'rolled_back'}
+                            onClick={() => onRollbackTransaction(tx.id)}
+                            className={`flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded transition-colors ${
+                              tx.status === 'rolled_back'
+                                ? 'bg-slate-800/40 text-slate-600 border border-slate-800 cursor-not-allowed'
+                                : 'bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-800/80'
+                            }`}
+                          >
+                            <Undo2 className="w-3 h-3" />
+                            <span>Rollback</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="pt-3 border-t border-slate-800 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowHistoryModal(false)}
+                className="px-4 py-2 text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors border border-slate-700"
+              >
+                Done
+              </button>
+            </div>
           </div>
         </div>
       )}

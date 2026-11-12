@@ -11,9 +11,15 @@ import { RegistryView } from '@/components/views/RegistryView';
 import { LockfileView } from '@/components/views/LockfileView';
 import { HealthDoctorView } from '@/components/views/HealthDoctorView';
 import { ProfilesView } from '@/components/views/ProfilesView';
+import { ModelsView } from '@/components/views/ModelsView';
 import { SettingsView } from '@/components/views/SettingsView';
 import { DocsView } from '@/components/views/DocsView';
 import { StorageService } from '@/lib/storage';
+import {
+  INITIAL_UPDATE_TRANSACTIONS,
+  recordTransaction,
+  rollbackTransaction,
+} from '@/lib/transaction-history';
 import {
   isTauriEnvironment,
   nativeCheckEnvironment,
@@ -30,6 +36,7 @@ import {
   TerminalLogEntry,
   RegistryNode,
   ReconciliationItem,
+  UpdateTransaction,
 } from '@/types';
 
 const emptySubscribe = () => () => {};
@@ -60,6 +67,7 @@ export default function Home() {
   const [settings, setSettings] = useState<EnvironmentSettings>(() => StorageService.getSettings());
   const [logs, setLogs] = useState<TerminalLogEntry[]>(() => StorageService.getLogs());
   const [pipQueue, setPipQueue] = useState<PipQueueItem[]>(() => StorageService.getPipQueue());
+  const [transactions, setTransactions] = useState<UpdateTransaction[]>(INITIAL_UPDATE_TRANSACTIONS);
 
   const addLog = (entry: Omit<TerminalLogEntry, 'id'>) => {
     const newEntry: TerminalLogEntry = {
@@ -503,15 +511,63 @@ export default function Home() {
       type: 'info',
       text: `[Batch Update] Pulling latest commits and updating dependencies...`,
     });
-    const updated = nodes.map((n) => ({ ...n, hasUpdate: false }));
+
+    let newTxList = [...transactions];
+    const updated = nodes.map((n) => {
+      if (n.hasUpdate || n.folderName === 'comfyui_controlnet_aux_plus') {
+        newTxList = recordTransaction(newTxList, {
+          nodeFolderName: n.folderName,
+          nodeDisplayName: n.cleanDisplayName,
+          previousCommit: n.currentCommit,
+          targetCommit: n.latestCommit || 'a90e34c',
+        });
+      }
+      return { ...n, hasUpdate: false, currentCommit: n.latestCommit || 'a90e34c' };
+    });
+
+    setTransactions(newTxList);
     updateNodes(updated);
     setTimeout(() => {
       addLog({
         timestamp: new Date().toLocaleTimeString(),
         type: 'success',
-        text: `All ${nodes.length} custom nodes synchronized to latest upstream HEAD.`,
+        text: `All ${nodes.length} custom nodes synchronized to latest upstream HEAD. Update ledger recorded for rollback.`,
       });
     }, 1000);
+  };
+
+  const handleRollbackTransaction = (txId: string) => {
+    const { updatedTransactions, rolledBackTx } = rollbackTransaction(transactions, txId);
+    if (!rolledBackTx) return;
+
+    setTransactions(updatedTransactions);
+
+    const targetFolder = rolledBackTx.nodeFolderName;
+    const targetCommit = rolledBackTx.previousCommit;
+
+    setNodes((prev) =>
+      prev.map((n) => {
+        if (n.folderName === targetFolder) {
+          return {
+            ...n,
+            currentCommit: targetCommit,
+            hasUpdate: true,
+          };
+        }
+        return n;
+      })
+    );
+
+    addLog({
+      timestamp: new Date().toLocaleTimeString(),
+      type: 'warn',
+      text: `[Git Rollback] ${rolledBackTx.rollbackCommand}`,
+    });
+    addLog({
+      timestamp: new Date().toLocaleTimeString(),
+      type: 'success',
+      text: `[Git Rollback] Successfully rolled back ${rolledBackTx.nodeDisplayName} to commit ${targetCommit}.`,
+    });
   };
 
   // Lockfile Reconciliation Handler
@@ -743,11 +799,13 @@ export default function Home() {
         {activeTab === 'registry' && (
           <RegistryView
             installedNodes={nodes}
+            transactions={transactions}
             onInstallFromRegistry={handleInstallFromRegistry}
             onInstallViaGitUrl={handleInstallViaGitUrl}
             onBatchUrlImport={handleBatchUrlImport}
             onCheckUpdates={handleCheckUpdates}
             onUpdateAll={handleUpdateAll}
+            onRollbackTransaction={handleRollbackTransaction}
           />
         )}
 
@@ -773,6 +831,18 @@ export default function Home() {
             onSwitchProfile={handleSwitchProfile}
             onCreateProfile={handleCreateProfile}
             onInstallMissingNodes={handleInstallMissingNodes}
+          />
+        )}
+
+        {activeTab === 'models' && (
+          <ModelsView
+            onRunTerminalCommand={(cmd) => {
+              addLog({
+                timestamp: new Date().toLocaleTimeString(),
+                type: 'info',
+                text: cmd,
+              });
+            }}
           />
         )}
 

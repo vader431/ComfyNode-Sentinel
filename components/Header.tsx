@@ -9,6 +9,7 @@ import {
   FileCode2,
   Stethoscope,
   Workflow,
+  HardDrive,
   Settings,
   Share2,
   BookOpen,
@@ -22,6 +23,7 @@ export type ActiveTab =
   | 'lockfile'
   | 'doctor'
   | 'profiles'
+  | 'models'
   | 'settings'
   | 'docs';
 
@@ -52,6 +54,7 @@ export function Header({
     { id: 'lockfile', label: 'Lockfile', icon: FileCode2 },
     { id: 'doctor', label: 'Health Doctor', icon: Stethoscope },
     { id: 'profiles', label: 'Workflows', icon: Workflow },
+    { id: 'models', label: 'Models & VRAM', icon: HardDrive },
     { id: 'settings', label: 'Settings', icon: Settings },
     { id: 'docs', label: 'Docs', icon: BookOpen },
   ];

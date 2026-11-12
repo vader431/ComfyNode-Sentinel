@@ -172,3 +172,67 @@ export interface DependencyConflict {
   description: string;
   recommendedResolution: string;
 }
+
+export type ModelCategory = 'checkpoints' | 'loras' | 'controlnet' | 'vae' | 'upscale_models';
+export type BaseModelFamily = 'Flux.1' | 'SDXL' | 'SD1.5' | 'SD3' | 'HunyuanVideo' | 'Unknown';
+
+export interface ModelAsset {
+  id: string;
+  fileName: string;
+  category: ModelCategory;
+  relativePath: string;
+  sizeBytes: number;
+  sizeGb: number;
+  hash: string;
+  baseModel: BaseModelFamily;
+  isDuplicate: boolean;
+  duplicateGroupId?: string;
+  isSymlink: boolean;
+  symlinkTarget?: string;
+}
+
+export interface ModelDeduplicationResult {
+  totalModelsCount: number;
+  totalStorageGb: number;
+  duplicateGroups: {
+    hash: string;
+    fileName: string;
+    sizeGb: number;
+    assets: ModelAsset[];
+  }[];
+  potentialSavingsGb: number;
+}
+
+export interface VramEstimationParams {
+  baseModel: BaseModelFamily;
+  quantization: 'fp16' | 'bf16' | 'fp8' | 'q4';
+  resolution: '512x512' | '768x768' | '1024x1024' | '1920x1080';
+  batchSize: number;
+  loraCount: number;
+  controlNetCount: number;
+}
+
+export interface VramEstimateResult {
+  baseWeightsVramGb: number;
+  activationsVramGb: number;
+  loraVramGb: number;
+  controlNetVramGb: number;
+  totalPeakVramGb: number;
+  tierRecommendation: string;
+  fitsIn8Gb: boolean;
+  fitsIn12Gb: boolean;
+  fitsIn16Gb: boolean;
+  fitsIn24Gb: boolean;
+  warnings: string[];
+}
+
+export interface UpdateTransaction {
+  id: string;
+  nodeFolderName: string;
+  nodeDisplayName: string;
+  previousCommit: string;
+  targetCommit: string;
+  timestamp: string;
+  status: 'applied' | 'rolled_back';
+  rollbackCommand: string;
+}
