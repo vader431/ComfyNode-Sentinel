@@ -66,6 +66,13 @@ export default function Home() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isConsoleDrawerOpen, setIsConsoleDrawerOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [updateProgress, setUpdateProgress] = useState<{
+    active: boolean;
+    phase: 'checking' | 'updating';
+    current: number;
+    total: number;
+    currentNode?: string;
+  } | null>(null);
 
   // Persistent States initialized via lazy initializers
   const [nodes, setNodes] = useState<InstalledNode[]>(() => StorageService.getNodes());
@@ -580,7 +587,13 @@ export default function Home() {
       text: `Checking upstream git remotes with git ls-remote...`,
     });
 
-    const res = await checkUpdatesReal(settings.comfyRoot);
+    setUpdateProgress({ active: true, phase: 'checking', current: 0, total: nodes.length });
+    let res;
+    try {
+      res = await checkUpdatesReal(settings.comfyRoot);
+    } finally {
+      setUpdateProgress(null);
+    }
     if (res.error || !res.updates) {
       const msg = res.error || 'Failed to query git remotes';
       addLog({
@@ -638,34 +651,53 @@ export default function Home() {
 
     let newTxList = [...transactions];
     let updatedCount = 0;
-    for (const n of targets) {
-      const res = await updateNodeReal(settings.comfyRoot, n.folderName);
-      if (res.success) {
-        updatedCount++;
-        newTxList = recordTransaction(newTxList, {
-          nodeFolderName: n.folderName,
-          nodeDisplayName: n.cleanDisplayName,
-          previousCommit: res.previousCommit || n.currentCommit,
-          targetCommit: res.newCommit || n.latestCommit || n.currentCommit,
+    try {
+      for (let i = 0; i < targets.length; i++) {
+        const n = targets[i];
+        setUpdateProgress({
+          active: true,
+          phase: 'updating',
+          current: i,
+          total: targets.length,
+          currentNode: n.folderName,
         });
-        addLog({
-          timestamp: new Date().toLocaleTimeString(),
-          type: 'success',
-          text: `[Updated] ${n.folderName}: ${res.previousCommit} -> ${res.newCommit}`,
-        });
-      } else {
-        addLog({
-          timestamp: new Date().toLocaleTimeString(),
-          type: 'stderr',
-          text: `[Update Error] ${n.folderName}: ${res.error || 'git pull failed'}`,
+        const res = await updateNodeReal(settings.comfyRoot, n.folderName);
+        if (res.success) {
+          updatedCount++;
+          newTxList = recordTransaction(newTxList, {
+            nodeFolderName: n.folderName,
+            nodeDisplayName: n.cleanDisplayName,
+            previousCommit: res.previousCommit || n.currentCommit,
+            targetCommit: res.newCommit || n.latestCommit || n.currentCommit,
+          });
+          addLog({
+            timestamp: new Date().toLocaleTimeString(),
+            type: 'success',
+            text: `[Updated] ${n.folderName}: ${res.previousCommit} -> ${res.newCommit}`,
+          });
+        } else {
+          addLog({
+            timestamp: new Date().toLocaleTimeString(),
+            type: 'stderr',
+            text: `[Update Error] ${n.folderName}: ${res.error || 'git pull failed'}`,
+          });
+        }
+        setUpdateProgress({
+          active: true,
+          phase: 'updating',
+          current: i + 1,
+          total: targets.length,
+          currentNode: n.folderName,
         });
       }
-    }
 
-    setTransactions(newTxList);
-    StorageService.setTransactions(newTxList);
-    await performFullScan(settings.comfyRoot, settings.pythonBinary);
-    return { ok: true, message: `Updated ${updatedCount} of ${targets.length} custom node(s).` };
+      setTransactions(newTxList);
+      StorageService.setTransactions(newTxList);
+      await performFullScan(settings.comfyRoot, settings.pythonBinary);
+      return { ok: true, message: `Updated ${updatedCount} of ${targets.length} custom node(s).` };
+    } finally {
+      setUpdateProgress(null);
+    }
   };
 
   const handleUpdateSingleNode = async (folderName: string): Promise<{ ok: boolean; message: string }> => {
@@ -1111,6 +1143,7 @@ export default function Home() {
                 onUpdateAll={handleUpdateAll}
                 onUpdateSingleNode={handleUpdateSingleNode}
                 onRollbackTransaction={handleRollbackTransaction}
+                updateProgress={updateProgress}
               />
             )}
 

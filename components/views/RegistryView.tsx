@@ -35,6 +35,13 @@ interface RegistryViewProps {
   onUpdateAll: () => Promise<ActionResult> | ActionResult;
   onUpdateSingleNode?: (folderName: string) => Promise<ActionResult> | ActionResult;
   onRollbackTransaction?: (id: string) => void;
+  updateProgress?: {
+    active: boolean;
+    phase: 'checking' | 'updating';
+    current: number;
+    total: number;
+    currentNode?: string;
+  } | null;
 }
 
 export function RegistryView({
@@ -50,6 +57,7 @@ export function RegistryView({
   onUpdateAll,
   onUpdateSingleNode,
   onRollbackTransaction,
+  updateProgress,
 }: RegistryViewProps) {
   const mode = initialSubTab;
   const [searchQuery, setSearchQuery] = useState('');
@@ -449,6 +457,45 @@ export function RegistryView({
               </div>
             </div>
           </div>
+
+          {/* Live Progress Bar for Checking / Updating */}
+          {updateProgress?.active && (
+            <div className="rounded-xl border border-indigo-500/40 bg-indigo-950/20 p-4 space-y-2.5">
+              <div className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2 text-indigo-200 font-medium">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+                  <span>
+                    {updateProgress.phase === 'checking'
+                      ? `Checking upstream git remotes (${updateProgress.total} repositories)...`
+                      : `Updating repositories (${updateProgress.current} / ${updateProgress.total})${
+                          updateProgress.currentNode ? `: ${updateProgress.currentNode}` : ''
+                        }`}
+                  </span>
+                </div>
+                {updateProgress.phase === 'updating' && updateProgress.total > 0 && (
+                  <span className="font-mono text-indigo-300 font-semibold tabular-nums">
+                    {Math.round((updateProgress.current / updateProgress.total) * 100)}%
+                  </span>
+                )}
+              </div>
+              <div className="h-2 w-full rounded-full bg-slate-900 border border-slate-800 overflow-hidden">
+                {updateProgress.phase === 'checking' ? (
+                  <div className="h-full w-1/2 rounded-full bg-gradient-to-r from-indigo-500 via-sky-400 to-indigo-500 animate-pulse" />
+                ) : (
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-emerald-400 transition-all duration-300"
+                    style={{
+                      width: `${
+                        updateProgress.total > 0
+                          ? Math.min(100, Math.round((updateProgress.current / updateProgress.total) * 100))
+                          : 0
+                      }%`,
+                    }}
+                  />
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Per-Node Update Table */}
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden">
