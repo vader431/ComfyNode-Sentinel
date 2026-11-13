@@ -1222,12 +1222,10 @@ export default function Home() {
       {/* Persistent Studio Status Bar */}
       <StatusBar
         comfyRoot={settings.comfyRoot}
-        activeProfileName={profiles.find((p) => p.id === activeProfileId)?.name || 'Default'}
         pipQueue={pipQueue}
         isTauri={isTauriEnvironment()}
         onNavigateToSettings={() => setActiveTab('settings')}
         onNavigateToRunner={() => setActiveTab('runner')}
-        onNavigateToProfiles={() => setActiveTab('profiles')}
       />
     </div>
   );

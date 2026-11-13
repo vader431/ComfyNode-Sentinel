@@ -3,7 +3,6 @@
 import React from 'react';
 import {
   Folder,
-  Layers,
   Terminal,
   Monitor,
   ShieldCheck,
@@ -12,22 +11,18 @@ import { PipQueueItem } from '@/types';
 
 interface StatusBarProps {
   comfyRoot: string;
-  activeProfileName: string;
   pipQueue: PipQueueItem[];
   isTauri: boolean;
   onNavigateToSettings: () => void;
   onNavigateToRunner: () => void;
-  onNavigateToProfiles: () => void;
 }
 
 export function StatusBar({
   comfyRoot,
-  activeProfileName,
   pipQueue,
   isTauri,
   onNavigateToSettings,
   onNavigateToRunner,
-  onNavigateToProfiles,
 }: StatusBarProps) {
   const activeJob = pipQueue.find((q) => q.status === 'running');
   const pendingJobs = pipQueue.filter((q) => q.status === 'queued').length;
@@ -44,18 +39,6 @@ export function StatusBar({
         >
           <Folder className="w-3 h-3 text-indigo-400 shrink-0" />
           <span className="truncate">{comfyRoot || 'No ComfyUI Root Selected'}</span>
-        </button>
-      </div>
-
-      {/* Center: Active Profile */}
-      <div className="hidden md:flex items-center gap-2">
-        <button
-          onClick={onNavigateToProfiles}
-          title="Switch workspace profile"
-          className="flex items-center gap-1.5 px-2 py-0.5 rounded hover:bg-slate-800/60 hover:text-indigo-300 transition-colors"
-        >
-          <Layers className="w-3 h-3 text-indigo-400" />
-          <span>Profile: <strong className="text-slate-200 font-semibold">{activeProfileName || 'Default'}</strong></span>
         </button>
       </div>
 
