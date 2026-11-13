@@ -70,6 +70,7 @@ export function InspectorView({
   const [sortAsc, setSortAsc] = useState<boolean>(true);
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
   const [drawerNodeId, setDrawerNodeId] = useState<string | null>(null);
+  const [showCharts, setShowCharts] = useState<boolean>(false);
 
   // Categories
   const categories = Array.from(new Set(nodes.map((n) => n.category))).filter(Boolean);
@@ -337,6 +338,19 @@ export function InspectorView({
               <span>Normalizer Tool ({normalizerCandidates.length})</span>
             </button>
 
+            {/* Storage Charts Toggle */}
+            <button
+              onClick={() => setShowCharts((prev) => !prev)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors ${
+                showCharts
+                  ? 'bg-indigo-600/20 border-indigo-500/40 text-indigo-300'
+                  : 'text-slate-200 bg-slate-800 hover:bg-slate-700 border-slate-700'
+              }`}
+            >
+              <BarChart3 className="w-3.5 h-3.5 text-indigo-400" />
+              <span>{showCharts ? 'Hide Charts' : 'Storage Charts'}</span>
+            </button>
+
             {/* Safe Trash Bin */}
             <button
               onClick={() => setShowTrashModal(true)}
@@ -391,7 +405,8 @@ export function InspectorView({
           </div>
         </div>
 
-        {/* Mini Charts Visualization Panel */}
+        {/* Mini Charts Visualization Panel (Collapsible) */}
+        {showCharts && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6 pt-6 border-t border-slate-800/80">
           {/* Mini Chart 1: Category Distribution Pie Chart */}
           <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-4 flex flex-col justify-between">
@@ -690,6 +705,7 @@ export function InspectorView({
             </div>
           </div>
         </div>
+        )}
       </div>
 
       {/* Filter and Search Bar */}

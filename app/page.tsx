@@ -2,9 +2,11 @@
 
 import React, { useState, useEffect, useCallback, useSyncExternalStore } from 'react';
 import { Header, ActiveTab } from '@/components/Header';
+import { Sidebar } from '@/components/Sidebar';
+import { OnboardingCard } from '@/components/OnboardingCard';
+import { ToastContainer, ToastMessage } from '@/components/ToastContainer';
+import { ConsoleDrawer } from '@/components/ConsoleDrawer';
 import { StatusBar } from '@/components/StatusBar';
-import { ExportModal } from '@/components/ExportModal';
-import { RoadmapView } from '@/components/views/RoadmapView';
 import { InspectorView } from '@/components/views/InspectorView';
 import { TerminalRunnerView } from '@/components/views/TerminalRunnerView';
 import { RegistryView } from '@/components/views/RegistryView';
@@ -13,7 +15,6 @@ import { HealthDoctorView } from '@/components/views/HealthDoctorView';
 import { ProfilesView } from '@/components/views/ProfilesView';
 import { ModelsView } from '@/components/views/ModelsView';
 import { SettingsView } from '@/components/views/SettingsView';
-import { DocsView } from '@/components/views/DocsView';
 import { StorageService } from '@/lib/storage';
 import {
   recordTransaction,
@@ -34,7 +35,6 @@ import {
   streamExecReal,
 } from '@/lib/system-client';
 import {
-  RoadmapTask,
   InstalledNode,
   WorkspaceProfile,
   EnvironmentSettings,
@@ -60,11 +60,13 @@ export default function Home() {
   );
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('inspector');
-  const [showExportModal, setShowExportModal] = useState(false);
   const [targetRunnerCommand, setTargetRunnerCommand] = useState<string>('');
+  const [isScanning, setIsScanning] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isConsoleDrawerOpen, setIsConsoleDrawerOpen] = useState(false);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   // Persistent States initialized via lazy initializers
-  const [tasks, setTasks] = useState<RoadmapTask[]>(() => StorageService.getTasks());
   const [nodes, setNodes] = useState<InstalledNode[]>(() => StorageService.getNodes());
   const [trashNodes, setTrashNodes] = useState<InstalledNode[]>(() => StorageService.getTrash());
   const [profiles, setProfiles] = useState<WorkspaceProfile[]>(() => StorageService.getProfiles());
@@ -94,11 +96,17 @@ export default function Home() {
     StorageService.setLogs([]);
   };
 
-  // Save changes to storage
-  const updateTasks = (newTasks: RoadmapTask[]) => {
-    setTasks(newTasks);
-    StorageService.setTasks(newTasks);
-  };
+  const pushToast = useCallback((tone: ToastMessage['tone'], title: string, detail?: string) => {
+    const id = `toast-${Date.now()}-${Math.random()}`;
+    setToasts((prev) => [...prev.slice(-3), { id, tone, title, detail }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4500);
+  }, []);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
 
   const updateNodes = (newNodes: InstalledNode[]) => {
     setNodes(newNodes);
@@ -132,6 +140,7 @@ export default function Home() {
 
   const performFullScan = useCallback(async (comfyRoot: string, pythonBinary?: string) => {
     if (!comfyRoot) return;
+    setIsScanning(true);
     try {
       const env = await checkEnvironmentReal(comfyRoot, pythonBinary);
       setSettings((prev) => {
@@ -163,6 +172,8 @@ export default function Home() {
       }
     } catch {
       // Ignore startup network errors if backend is still initializing
+    } finally {
+      setIsScanning(false);
     }
   }, []);
 
@@ -175,17 +186,6 @@ export default function Home() {
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isClient]);
-
-  // Task handlers
-  const handleToggleTask = (taskId: string) => {
-    const updated = tasks.map((t) => (t.id === taskId ? { ...t, completed: !t.completed } : t));
-    updateTasks(updated);
-  };
-
-  const handleAddTask = (task: RoadmapTask) => {
-    const updated = [task, ...tasks];
-    updateTasks(updated);
-  };
 
   // Node Inspector Handlers
   const handleToggleNodeState = async (folderName: string) => {
@@ -884,7 +884,6 @@ export default function Home() {
   // Reset demo data
   const handleResetAllData = () => {
     StorageService.resetToDefaults();
-    setTasks(StorageService.getTasks());
     setNodes(StorageService.getNodes());
     setTrashNodes(StorageService.getTrash());
     setProfiles(StorageService.getProfiles());
@@ -893,6 +892,7 @@ export default function Home() {
     setSettings(StorageService.getSettings());
     setLogs(StorageService.getLogs());
     setPipQueue(StorageService.getPipQueue());
+    pushToast('info', 'Reset to defaults', 'Local preferences and logs cleared.');
   };
 
   const handleRefreshNodes = async () => {
@@ -907,6 +907,7 @@ export default function Home() {
       type: 'success',
       text: `[Sentinel] Filesystem scan complete.`,
     });
+    pushToast('success', 'Filesystem scan complete', `Scanned ${settings.comfyRoot}`);
   };
 
   const handleLaunchComfyUI = async () => {
@@ -959,168 +960,202 @@ export default function Home() {
     );
   }
 
+  const updatesCount = nodes.filter((n) => n.hasUpdate).length;
+  const healthIssuesCount = nodes.filter((n) => n.healthStatus !== 'compliant').length;
+  const pipQueueBusyCount = pipQueue.filter(
+    (q) => q.status === 'running' || q.status === 'queued' || q.status === 'blocked_by_shield'
+  ).length;
+
   return (
     <div className="min-h-screen flex flex-col bg-[#0b0f17] text-slate-100">
-      {/* Top Bar Contract (Wordmark, single-line links, 1 primary action) */}
+      {/* Compact 48px Top Utility Bar */}
       <Header
-        activeTab={activeTab}
         setActiveTab={setActiveTab}
-        installedCount={nodes.length}
+        isValidRoot={settings.isValidRoot}
+        autoTorchShield={settings.autoTorchShield}
         isTauri={isTauriEnvironment()}
+        isScanning={isScanning}
         onRefreshNodes={handleRefreshNodes}
         onLaunchComfyUI={handleLaunchComfyUI}
+        onToggleMobileMenu={() => setIsMobileMenuOpen((prev) => !prev)}
+        onToggleConsoleDrawer={() => setIsConsoleDrawerOpen((prev) => !prev)}
+        isConsoleDrawerOpen={isConsoleDrawerOpen}
       />
 
-      {/* Main Content Viewport */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 pb-14">
-        {!settings.isValidRoot && !setupBannerDismissed && activeTab !== 'settings' && (
-          <div className="mb-6 rounded-xl border border-amber-700/60 bg-amber-950/30 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="text-xs text-amber-200">
-              <span className="font-semibold">ComfyUI directory not verified on disk:</span>{' '}
-              <code className="font-mono text-amber-100">{settings.comfyRoot || '(unset)'}</code>. Configure your ComfyUI root path in Settings to manage real custom nodes and models.
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                onClick={() => setActiveTab('settings')}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-slate-950 transition-colors"
-              >
-                Open Settings
-              </button>
-              <button
-                onClick={() => setSetupBannerDismissed(true)}
-                className="px-2.5 py-1.5 rounded-lg text-xs text-amber-300 hover:text-white transition-colors"
-              >
-                Dismiss
-              </button>
-            </div>
+      {/* Desktop App Shell: Left Sidebar Rail + Main Workspace */}
+      <div className="flex flex-1 min-h-0">
+        <Sidebar
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          installedCount={nodes.length}
+          updatesCount={updatesCount}
+          healthIssuesCount={healthIssuesCount}
+          pipQueueBusyCount={pipQueueBusyCount}
+          isOpenMobile={isMobileMenuOpen}
+          onCloseMobile={() => setIsMobileMenuOpen(false)}
+        />
+
+        <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 pb-20">
+          <div className="max-w-7xl mx-auto">
+            {!settings.isValidRoot && activeTab === 'inspector' ? (
+              <OnboardingCard
+                settings={settings}
+                onSaveAndScan={handleUpdateSettings}
+                onOpenFullSettings={() => setActiveTab('settings')}
+              />
+            ) : (
+              <>
+                {!settings.isValidRoot && !setupBannerDismissed && activeTab !== 'settings' && (
+                  <div className="mb-6 rounded-xl border border-amber-700/60 bg-amber-950/30 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="text-xs text-amber-200">
+                      <span className="font-semibold">ComfyUI directory not verified on disk:</span>{' '}
+                      <code className="font-mono text-amber-100">{settings.comfyRoot || '(unset)'}</code>. Configure your ComfyUI root path in Settings to manage real custom nodes and models.
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => setActiveTab('settings')}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-slate-950 transition-colors"
+                      >
+                        Open Settings
+                      </button>
+                      <button
+                        onClick={() => setSetupBannerDismissed(true)}
+                        className="px-2.5 py-1.5 rounded-lg text-xs text-amber-300 hover:text-white transition-colors"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'inspector' && (
+                  <InspectorView
+                    nodes={nodes}
+                    trashNodes={trashNodes}
+                    showCleanNames={settings.showCleanNames}
+                    setShowCleanNames={(show) => updateSettings({ ...settings, showCleanNames: show })}
+                    aliases={aliases}
+                    onUpdateAlias={handleUpdateAlias}
+                    onToggleNodeState={handleToggleNodeState}
+                    onUninstallNode={handleUninstallNode}
+                    onRestoreNode={handleRestoreNode}
+                    onNormalizeBatch={handleNormalizeBatch}
+                    onNavigateToDoctor={() => {
+                      setActiveTab('doctor');
+                    }}
+                    onNavigateToRunner={(cmd) => {
+                      setTargetRunnerCommand(cmd);
+                      setActiveTab('runner');
+                    }}
+                  />
+                )}
+              </>
+            )}
+
+            {activeTab === 'runner' && (
+              <TerminalRunnerView
+                key={targetRunnerCommand}
+                logs={logs}
+                pipQueue={pipQueue}
+                onAddLog={addLog}
+                onClearLogs={clearLogs}
+                onEnqueuePip={handleEnqueuePip}
+                onResolveShield={handleResolveShield}
+                autoTorchShield={settings.autoTorchShield}
+                comfyRoot={settings.comfyRoot}
+                pythonBinary={settings.pythonBinary}
+                initialCommand={targetRunnerCommand}
+              />
+            )}
+
+            {(activeTab === 'registry' || activeTab === 'updates') && (
+              <RegistryView
+                key={activeTab}
+                initialSubTab={activeTab === 'updates' ? 'updates' : 'browse'}
+                installedNodes={nodes}
+                transactions={transactions}
+                isValidRoot={settings.isValidRoot}
+                onNavigateToSettings={() => setActiveTab('settings')}
+                onInstallFromRegistry={handleInstallFromRegistry}
+                onInstallViaGitUrl={handleInstallViaGitUrl}
+                onBatchUrlImport={handleBatchUrlImport}
+                onCheckUpdates={handleCheckUpdates}
+                onUpdateAll={handleUpdateAll}
+                onUpdateSingleNode={handleUpdateSingleNode}
+                onRollbackTransaction={handleRollbackTransaction}
+              />
+            )}
+
+            {activeTab === 'lockfile' && (
+              <LockfileView
+                installedNodes={nodes}
+                onApplyReconciliation={handleApplyReconciliation}
+              />
+            )}
+
+            {activeTab === 'doctor' && (
+              <HealthDoctorView
+                installedNodes={nodes}
+                comfyRoot={settings.comfyRoot}
+                scannedRequirementsMap={scannedRequirementsMap}
+                onPatchInstalledNode={handlePatchInstalledNode}
+              />
+            )}
+
+            {activeTab === 'profiles' && (
+              <ProfilesView
+                profiles={profiles}
+                activeProfileId={activeProfileId}
+                installedNodes={nodes}
+                onSwitchProfile={handleSwitchProfile}
+                onCreateProfile={handleCreateProfile}
+                onInstallMissingNodes={handleInstallMissingNodes}
+              />
+            )}
+
+            {activeTab === 'models' && (
+              <ModelsView
+                comfyRoot={settings.comfyRoot}
+                isValidRoot={settings.isValidRoot}
+                onRunTerminalCommand={(cmd) => {
+                  addLog({
+                    timestamp: new Date().toLocaleTimeString(),
+                    type: 'info',
+                    text: cmd,
+                  });
+                }}
+              />
+            )}
+
+            {activeTab === 'settings' && (
+              <SettingsView
+                settings={settings}
+                onUpdateSettings={handleUpdateSettings}
+                onResetAllData={handleResetAllData}
+              />
+            )}
           </div>
-        )}
-        {activeTab === 'roadmap' && (
-          <RoadmapView
-            tasks={tasks}
-            onToggleTask={handleToggleTask}
-            onAddTask={handleAddTask}
-            onOpenExportModal={() => setShowExportModal(true)}
-          />
-        )}
+        </main>
+      </div>
 
-        {activeTab === 'inspector' && (
-          <InspectorView
-            nodes={nodes}
-            trashNodes={trashNodes}
-            showCleanNames={settings.showCleanNames}
-            setShowCleanNames={(show) => updateSettings({ ...settings, showCleanNames: show })}
-            aliases={aliases}
-            onUpdateAlias={handleUpdateAlias}
-            onToggleNodeState={handleToggleNodeState}
-            onUninstallNode={handleUninstallNode}
-            onRestoreNode={handleRestoreNode}
-            onNormalizeBatch={handleNormalizeBatch}
-            onNavigateToDoctor={() => {
-              setActiveTab('doctor');
-            }}
-            onNavigateToRunner={(cmd) => {
-              setTargetRunnerCommand(cmd);
-              setActiveTab('runner');
-            }}
-          />
-        )}
+      {/* Collapsible Console Quick-Peek Drawer */}
+      <ConsoleDrawer
+        isOpen={isConsoleDrawerOpen}
+        logs={logs}
+        pipQueue={pipQueue}
+        onClose={() => setIsConsoleDrawerOpen(false)}
+        onExpandToFullTab={() => {
+          setIsConsoleDrawerOpen(false);
+          setActiveTab('runner');
+        }}
+        onClearLogs={clearLogs}
+      />
 
-        {activeTab === 'runner' && (
-          <TerminalRunnerView
-            key={targetRunnerCommand}
-            logs={logs}
-            pipQueue={pipQueue}
-            onAddLog={addLog}
-            onClearLogs={clearLogs}
-            onEnqueuePip={handleEnqueuePip}
-            onResolveShield={handleResolveShield}
-            autoTorchShield={settings.autoTorchShield}
-            comfyRoot={settings.comfyRoot}
-            pythonBinary={settings.pythonBinary}
-            initialCommand={targetRunnerCommand}
-          />
-        )}
-
-        {activeTab === 'registry' && (
-          <RegistryView
-            installedNodes={nodes}
-            transactions={transactions}
-            isValidRoot={settings.isValidRoot}
-            onNavigateToSettings={() => setActiveTab('settings')}
-            onInstallFromRegistry={handleInstallFromRegistry}
-            onInstallViaGitUrl={handleInstallViaGitUrl}
-            onBatchUrlImport={handleBatchUrlImport}
-            onCheckUpdates={handleCheckUpdates}
-            onUpdateAll={handleUpdateAll}
-            onUpdateSingleNode={handleUpdateSingleNode}
-            onRollbackTransaction={handleRollbackTransaction}
-          />
-        )}
-
-        {activeTab === 'lockfile' && (
-          <LockfileView
-            installedNodes={nodes}
-            onApplyReconciliation={handleApplyReconciliation}
-          />
-        )}
-
-        {activeTab === 'doctor' && (
-          <HealthDoctorView
-            installedNodes={nodes}
-            comfyRoot={settings.comfyRoot}
-            scannedRequirementsMap={scannedRequirementsMap}
-            onPatchInstalledNode={handlePatchInstalledNode}
-          />
-        )}
-
-        {activeTab === 'profiles' && (
-          <ProfilesView
-            profiles={profiles}
-            activeProfileId={activeProfileId}
-            installedNodes={nodes}
-            onSwitchProfile={handleSwitchProfile}
-            onCreateProfile={handleCreateProfile}
-            onInstallMissingNodes={handleInstallMissingNodes}
-          />
-        )}
-
-        {activeTab === 'models' && (
-          <ModelsView
-            comfyRoot={settings.comfyRoot}
-            isValidRoot={settings.isValidRoot}
-            onRunTerminalCommand={(cmd) => {
-              addLog({
-                timestamp: new Date().toLocaleTimeString(),
-                type: 'info',
-                text: cmd,
-              });
-            }}
-          />
-        )}
-
-        {activeTab === 'settings' && (
-          <SettingsView
-            settings={settings}
-            onUpdateSettings={handleUpdateSettings}
-            onResetAllData={handleResetAllData}
-          />
-        )}
-
-        {activeTab === 'docs' && (
-          <DocsView
-            tasks={tasks}
-            onOpenExportModal={() => setShowExportModal(true)}
-            onNavigateToTab={(tabId) => setActiveTab(tabId as ActiveTab)}
-          />
-        )}
-      </main>
-
-      {/* Export Modal */}
-      <ExportModal
-        isOpen={showExportModal}
-        onClose={() => setShowExportModal(false)}
-        tasks={tasks}
+      {/* Global Toast Notifications */}
+      <ToastContainer
+        toasts={toasts}
+        onDismiss={dismissToast}
+        onOpenConsole={() => setIsConsoleDrawerOpen(true)}
       />
 
       {/* Persistent Studio Status Bar */}

@@ -26,6 +26,7 @@ interface RegistryViewProps {
   installedNodes: InstalledNode[];
   transactions?: UpdateTransaction[];
   isValidRoot?: boolean;
+  initialSubTab?: 'browse' | 'updates';
   onNavigateToSettings?: () => void;
   onInstallFromRegistry: (regNode: RegistryNode) => Promise<ActionResult> | ActionResult;
   onInstallViaGitUrl: (url: string, branch?: string, folderName?: string) => Promise<ActionResult> | ActionResult;
@@ -40,6 +41,7 @@ export function RegistryView({
   installedNodes,
   transactions = [],
   isValidRoot = true,
+  initialSubTab = 'browse',
   onNavigateToSettings,
   onInstallFromRegistry,
   onInstallViaGitUrl,
@@ -49,7 +51,7 @@ export function RegistryView({
   onUpdateSingleNode,
   onRollbackTransaction,
 }: RegistryViewProps) {
-  const [activeSubTab, setActiveSubTab] = useState<'browse' | 'updates'>('browse');
+  const [activeSubTab, setActiveSubTab] = useState<'browse' | 'updates'>(initialSubTab);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [showUrlModal, setShowUrlModal] = useState(false);
@@ -191,16 +193,11 @@ export function RegistryView({
       <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-6 shadow-sm">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 text-xs text-slate-400">
-              <span>Ingestion Channels (Phase 3)</span>
-              <span aria-hidden="true">·</span>
-              <span>Curated Registry & Git Pipeline</span>
-            </div>
-            <h1 className="text-xl md:text-2xl font-bold text-white tracking-tight mt-1">
-              Community Node Registry & Ingestion
+            <h1 className="text-xl font-bold text-white tracking-tight">
+              {activeSubTab === 'updates' ? 'Node Updates & Rollback' : 'Community Node Registry & Installer'}
             </h1>
-            <p className="text-xs md:text-sm text-slate-400 mt-1 max-w-2xl">
-              Discover trusted community extensions, install via direct Git clone, or import batch lists with automated deduplication and Torch Shielding.
+            <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-2xl">
+              Discover trusted community extensions, install via direct Git clone, or manage upstream updates with 1-click rollback.
             </p>
           </div>
 
