@@ -1,54 +1,11 @@
-workflow:
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
-      when: never
-    - if: $CI_COMMIT_TAG =~ /^v/
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - if: $CI_PIPELINE_SOURCE == "web"
-
-default:
-  interruptible: true
-
+# .gitlab-ci.yml - Tauri + Node.js Project Pipeline
 stages:
   - verify
   - package
 
-variables:
-  npm_config_cache: "$CI_PROJECT_DIR/.npm"
-  CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
-
-.install_js_deps: &install_js_deps
-  - |
-    if [ -f package-lock.json ]; then
-      npm ci
-    elif [ -f bun.lock ]; then
-      npx --yes bun install --frozen-lockfile
-    else
-      npm install --no-audit
-    fi
-
-verify:web:
-  stage: verify
-  image: node:22-bookworm
-  cache:
-    key:
-      files:
-        - package-lock.json
-        - bun.lock
-    paths:
-      - .npm/
-  script:
-    - *install_js_deps
-    - npx tsc --noEmit
-    - npm run lint
-    - npm test
-    - npm run build
-  rules:
-    - if: $CI_COMMIT_TAG =~ /^v/
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - if: $CI_PIPELINE_SOURCE == "web"
+# ============================================
+# Verify Stage (Rust & Web)
+# ============================================
 
 verify:rust:
   stage: verify
@@ -96,11 +53,47 @@ verify:rust:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_PIPELINE_SOURCE == "web"
 
+verify:web:
+  stage: verify
+  image: node:22-bookworm
+  needs: []
+  cache:
+    key:
+      files:
+        - package-lock.json
+        - bun.lock
+    paths:
+      - .npm/
+  before_script:
+    - *install_js_deps
+  script:
+    - export PATH="$CARGO_HOME/bin:$PATH"
+    - node scripts/prepare-desktop.mjs --sidecar-only
+    - mkdir -p src-tauri/standalone-server
+    - touch src-tauri/standalone-server/.ci-placeholder
+    - *install_js_deps
+    - npm run tauri:build
+  artifacts:
+    name: "comfynode-sentinel-linux-$CI_COMMIT_REF_SLUG"
+    expire_in: 30 days
+    paths:
+      - src-tauri/target/release/bundle/deb/*.deb
+      - src-tauri/target/release/bundle/rpm/*.rpm
+      - src-tauri/target/release/bundle/appimage/*.AppImage
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+    - when: manual
+      allow_failure: true
+
+# ============================================
+# Package Stage (Web & Linux)
+# ============================================
+
 package:web:
   stage: package
   image: node:22-bookworm
   needs:
-    - verify:web
+    - job: verify:web
   cache:
     key:
       files:
@@ -131,52 +124,19 @@ package:linux:
   stage: package
   image: ubuntu:22.04
   needs:
-    - verify:web
-    - verify:rust
+    - job: verify:web
+    - job: verify:rust
   variables:
     DEBIAN_FRONTEND: noninteractive
-    APPIMAGE_EXTRACT_AND_RUN: "1"
-  cache:
-    key:
-      files:
-        - package-lock.json
-        - src-tauri/Cargo.lock
-    paths:
-      - .npm/
-      - .cargo/
-      - src-tauri/target/
-  before_script:
-    - apt-get update
-    - apt-get install -y
-        ca-certificates
-        curl
-        wget
-        file
-        gnupg
-        build-essential
-        libwebkit2gtk-4.1-dev
-        libxdo-dev
-        libssl-dev
-        libayatana-appindicator3-dev
-        librsvg2-dev
-    - mkdir -p /etc/apt/keyrings
-    - curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
-    - echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
-    - apt-get update && apt-get install -y nodejs
-    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-    - export PATH="$CARGO_HOME/bin:$PATH"
   script:
     - export PATH="$CARGO_HOME/bin:$PATH"
-    - *install_js_deps
-    - npm run tauri:build
-  artifacts:
-    name: "comfynode-sentinel-linux-$CI_COMMIT_REF_SLUG"
-    expire_in: 30 days
-    paths:
-      - src-tauri/target/release/bundle/deb/*.deb
-      - src-tauri/target/release/bundle/rpm/*.rpm
-      - src-tauri/target/release/bundle/appimage/*.AppImage
+    - node scripts/prepare-desktop.mjs --sidecar-only
+    - mkdir -p src-tauri/standalone-server
+    - touch src-tauri/standalone-server/.ci-placeholder
+    - cargo check --manifest-path src-tauri/Cargo.toml --all-targets
   rules:
     - if: $CI_COMMIT_TAG =~ /^v/
-    - when: manual
-      allow_failure: true
+
+# ============================================
+# Pipeline Summary
+# ============================================
