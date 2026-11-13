@@ -32,6 +32,7 @@ interface RegistryViewProps {
   onBatchUrlImport: (urls: string[]) => Promise<ActionResult> | ActionResult;
   onCheckUpdates: () => Promise<ActionResult> | ActionResult;
   onUpdateAll: () => Promise<ActionResult> | ActionResult;
+  onUpdateSingleNode?: (folderName: string) => Promise<ActionResult> | ActionResult;
   onRollbackTransaction?: (id: string) => void;
 }
 
@@ -45,8 +46,10 @@ export function RegistryView({
   onBatchUrlImport,
   onCheckUpdates,
   onUpdateAll,
+  onUpdateSingleNode,
   onRollbackTransaction,
 }: RegistryViewProps) {
+  const [activeSubTab, setActiveSubTab] = useState<'browse' | 'updates'>('browse');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [showUrlModal, setShowUrlModal] = useState(false);
@@ -54,6 +57,8 @@ export function RegistryView({
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [copiedBisectId, setCopiedBisectId] = useState<string | null>(null);
   const [installingId, setInstallingId] = useState<string | null>(null);
+  const [updatingFolder, setUpdatingFolder] = useState<string | null>(null);
+  const [lastCheckedAt, setLastCheckedAt] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<'url' | 'batch' | 'check' | 'update' | null>(null);
   const [statusBanner, setStatusBanner] = useState<{ ok: boolean; message: string } | null>(null);
 
@@ -143,10 +148,12 @@ export function RegistryView({
   };
 
   const handleCheckUpdatesClick = async () => {
+    setActiveSubTab('updates');
     setBusyAction('check');
     setStatusBanner(null);
     try {
       const res = await onCheckUpdates();
+      setLastCheckedAt(new Date().toLocaleTimeString());
       if (res && typeof res === 'object') setStatusBanner(res);
     } finally {
       setBusyAction(null);
@@ -163,6 +170,20 @@ export function RegistryView({
       setBusyAction(null);
     }
   };
+
+  const handleUpdateSingleClick = async (folderName: string) => {
+    if (!onUpdateSingleNode) return;
+    setUpdatingFolder(folderName);
+    setStatusBanner(null);
+    try {
+      const res = await onUpdateSingleNode(folderName);
+      if (res && typeof res === 'object') setStatusBanner(res);
+    } finally {
+      setUpdatingFolder(null);
+    }
+  };
+
+  const updatesAvailableCount = installedNodes.filter((n) => n.hasUpdate).length;
 
   return (
     <div className="space-y-6">
@@ -264,7 +285,41 @@ export function RegistryView({
         </div>
       )}
 
-      {/* Filter and Search Bar */}
+      {/* Sub-Tabs */}
+      <div className="flex items-center gap-2 border-b border-slate-800/80 pb-3">
+        <button
+          onClick={() => setActiveSubTab('browse')}
+          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+            activeSubTab === 'browse'
+              ? 'bg-indigo-600 text-white'
+              : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+          }`}
+        >
+          <Download className="w-3.5 h-3.5" />
+          <span>Browse &amp; Install ({filteredRegistry.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('updates')}
+          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+            activeSubTab === 'updates'
+              ? 'bg-indigo-600 text-white'
+              : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+          }`}
+        >
+          <RotateCw className="w-3.5 h-3.5" />
+          <span>Updates &amp; Rollback</span>
+          {updatesAvailableCount > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold bg-amber-500 text-slate-950">
+              {updatesAvailableCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {activeSubTab === 'browse' && (
+        <>
+          {/* Filter and Search Bar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
         <div className="flex items-center gap-2 flex-wrap">
           <div className="relative flex-1 sm:w-72">
@@ -393,7 +448,176 @@ export function RegistryView({
             </div>
           );
         })}
-      </div>
+          </div>
+        </>
+      )}
+
+      {activeSubTab === 'updates' && (
+        <div className="space-y-6">
+          {/* Summary Strip */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+              <div className="text-[11px] text-slate-400">Installed Nodes</div>
+              <div className="text-xl font-bold text-white font-mono mt-1">{installedNodes.length}</div>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+              <div className="text-[11px] text-slate-400">Updates Available</div>
+              <div className={`text-xl font-bold font-mono mt-1 ${updatesAvailableCount > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                {updatesAvailableCount}
+              </div>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+              <div className="text-[11px] text-slate-400">Rollback Points</div>
+              <div className="text-xl font-bold text-indigo-300 font-mono mt-1">{transactions.length}</div>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+              <div className="text-[11px] text-slate-400">Last Remote Check</div>
+              <div className="text-sm font-semibold text-slate-200 font-mono mt-1.5">
+                {lastCheckedAt || 'Not checked yet'}
+              </div>
+            </div>
+          </div>
+
+          {/* Per-Node Update Table */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-800">
+              <h3 className="text-sm font-semibold text-white">
+                Repository Upstream Status
+              </h3>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleCheckUpdatesClick}
+                  disabled={busyAction !== null}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 border border-slate-700 rounded-lg transition-colors"
+                >
+                  <RotateCw className={`w-3.5 h-3.5 ${busyAction === 'check' ? 'animate-spin' : ''}`} />
+                  <span>{busyAction === 'check' ? 'Checking...' : 'Check Now'}</span>
+                </button>
+                {updatesAvailableCount > 0 && (
+                  <button
+                    onClick={handleUpdateAllClick}
+                    disabled={busyAction !== null}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-lg transition-colors"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Update All ({updatesAvailableCount})</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {installedNodes.length === 0 ? (
+              <div className="p-8 text-center text-xs text-slate-500 font-mono">
+                No custom nodes found in custom_nodes/. Configure your ComfyUI path in Settings or install a node first.
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-800/70">
+                {installedNodes.map((n) => (
+                  <div
+                    key={n.id}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3.5 hover:bg-slate-900/80"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-slate-100 font-mono truncate">
+                          {n.folderName}
+                        </span>
+                        {!n.enabled && (
+                          <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-mono text-slate-400">
+                            disabled
+                          </span>
+                        )}
+                        {n.hasUpdate ? (
+                          <span className="px-2 py-0.5 rounded-full bg-amber-950/70 border border-amber-700/60 text-[10px] font-mono text-amber-300">
+                            Update available
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-950/50 border border-emerald-800/50 text-[10px] font-mono text-emerald-400">
+                            Up to date
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-slate-500 font-mono mt-1 flex flex-wrap items-center gap-3">
+                        <span>Branch: {n.branch || 'unknown'}</span>
+                        <span>HEAD: {n.currentCommit || 'unknown'}</span>
+                        {n.latestCommit && n.hasUpdate && (
+                          <span className="text-amber-300">Upstream: {n.latestCommit}</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {n.hasUpdate && onUpdateSingleNode && (
+                        <button
+                          onClick={() => handleUpdateSingleClick(n.folderName)}
+                          disabled={updatingFolder !== null || busyAction !== null}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-lg transition-colors"
+                        >
+                          {updatingFolder === n.folderName ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>Updating...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Download className="w-3.5 h-3.5" />
+                              <span>Update</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Rollback Ledger */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <History className="w-4 h-4 text-amber-400" />
+                <h3 className="text-sm font-semibold text-white">
+                  Recent Update Rollback History ({transactions.length})
+                </h3>
+              </div>
+            </div>
+            {transactions.length === 0 ? (
+              <div className="p-6 text-center text-xs text-slate-500 font-mono">
+                No update transactions recorded yet. Updating a node creates a 1-click git rollback point.
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-800/70">
+                {transactions.map((tx) => (
+                  <div
+                    key={tx.id}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3.5"
+                  >
+                    <div>
+                      <div className="text-xs font-semibold text-slate-200 font-mono">
+                        {tx.nodeFolderName}
+                      </div>
+                      <div className="text-[11px] text-slate-400 font-mono mt-0.5">
+                        {tx.previousCommit} &rarr; {tx.targetCommit} &middot; {new Date(tx.timestamp).toLocaleString()}
+                      </div>
+                    </div>
+                    {onRollbackTransaction && tx.status === 'applied' && (
+                      <button
+                        onClick={() => onRollbackTransaction(tx.id)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-300 hover:text-white bg-amber-950/50 hover:bg-amber-900 border border-amber-800/60 rounded-lg transition-colors self-start sm:self-auto"
+                      >
+                        <Undo2 className="w-3.5 h-3.5" />
+                        <span>Rollback to {tx.previousCommit}</span>
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Direct Git Clone Modal */}
       {showUrlModal && (

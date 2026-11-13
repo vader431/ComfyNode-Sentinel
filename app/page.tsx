@@ -667,6 +667,44 @@ export default function Home() {
     return { ok: true, message: `Updated ${updatedCount} of ${targets.length} custom node(s).` };
   };
 
+  const handleUpdateSingleNode = async (folderName: string): Promise<{ ok: boolean; message: string }> => {
+    if (!settings.isValidRoot) {
+      return { ok: false, message: 'ComfyUI root directory is not configured. Open Settings to set a valid ComfyUI path.' };
+    }
+    const target = nodes.find((n) => n.folderName === folderName);
+    if (!target) {
+      return { ok: false, message: `Node ${folderName} not found.` };
+    }
+
+    const res = await updateNodeReal(settings.comfyRoot, folderName);
+    if (!res.success) {
+      const msg = res.error || 'git pull failed';
+      addLog({
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'stderr',
+        text: `[Update Error] ${folderName}: ${msg}`,
+      });
+      return { ok: false, message: `${folderName}: ${msg}` };
+    }
+
+    const newTxList = recordTransaction(transactions, {
+      nodeFolderName: target.folderName,
+      nodeDisplayName: target.cleanDisplayName,
+      previousCommit: res.previousCommit || target.currentCommit,
+      targetCommit: res.newCommit || target.latestCommit || target.currentCommit,
+    });
+    setTransactions(newTxList);
+    StorageService.setTransactions(newTxList);
+
+    addLog({
+      timestamp: new Date().toLocaleTimeString(),
+      type: 'success',
+      text: `[Updated] ${folderName}: ${res.previousCommit} -> ${res.newCommit}`,
+    });
+    await performFullScan(settings.comfyRoot, settings.pythonBinary);
+    return { ok: true, message: `Updated ${folderName} (${res.previousCommit} -> ${res.newCommit}).` };
+  };
+
   const handleRollbackTransaction = async (txId: string) => {
     const tx = transactions.find((t) => t.id === txId);
     if (!tx) return;
@@ -1015,6 +1053,7 @@ export default function Home() {
             onBatchUrlImport={handleBatchUrlImport}
             onCheckUpdates={handleCheckUpdates}
             onUpdateAll={handleUpdateAll}
+            onUpdateSingleNode={handleUpdateSingleNode}
             onRollbackTransaction={handleRollbackTransaction}
           />
         )}
