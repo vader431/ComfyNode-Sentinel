@@ -11,6 +11,7 @@ import {
   Menu,
   Terminal,
 } from 'lucide-react';
+import { SentinelLogo } from './SentinelLogo';
 
 export type ActiveTab =
   | 'inspector'
@@ -67,9 +68,7 @@ export function Header({
             onClick={() => setActiveTab('inspector')}
             className="flex items-center gap-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 rounded"
           >
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-600/20 border border-indigo-500/40 text-indigo-400 font-mono font-bold text-xs shadow-[0_0_12px_rgba(99,102,241,0.25)]">
-              CS
-            </div>
+            <SentinelLogo className="w-7 h-7 shrink-0 drop-shadow-[0_0_10px_rgba(99,102,241,0.3)]" />
             <div className="flex items-baseline gap-2">
               <span className="text-sm font-semibold tracking-tight text-white whitespace-nowrap">
                 ComfyNode Sentinel
