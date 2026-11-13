@@ -51,7 +51,7 @@ export function RegistryView({
   onUpdateSingleNode,
   onRollbackTransaction,
 }: RegistryViewProps) {
-  const [activeSubTab, setActiveSubTab] = useState<'browse' | 'updates'>(initialSubTab);
+  const mode = initialSubTab;
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [showUrlModal, setShowUrlModal] = useState(false);
@@ -150,7 +150,6 @@ export function RegistryView({
   };
 
   const handleCheckUpdatesClick = async () => {
-    setActiveSubTab('updates');
     setBusyAction('check');
     setStatusBanner(null);
     try {
@@ -194,55 +193,63 @@ export function RegistryView({
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h1 className="text-xl font-bold text-white tracking-tight">
-              {activeSubTab === 'updates' ? 'Node Updates & Rollback' : 'Community Node Registry & Installer'}
+              {mode === 'updates' ? 'Node Updates & Rollback' : 'Community Node Registry & Installer'}
             </h1>
             <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-2xl">
-              Discover trusted community extensions, install via direct Git clone, or manage upstream updates with 1-click rollback.
+              {mode === 'updates'
+                ? 'Check upstream git remotes, pull updates per node or in batch, and roll back any update in one click.'
+                : 'Discover trusted community extensions, install via direct Git clone, or import batch lists.'}
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <button
-              onClick={() => setShowUrlModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Install via URL</span>
-            </button>
+            {mode === 'browse' ? (
+              <>
+                <button
+                  onClick={() => setShowUrlModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Install via URL</span>
+                </button>
 
-            <button
-              onClick={() => setShowBatchModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors"
-            >
-              <FileText className="w-3.5 h-3.5" />
-              <span>Batch URL Import</span>
-            </button>
+                <button
+                  onClick={() => setShowBatchModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Batch URL Import</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={handleCheckUpdatesClick}
+                  disabled={busyAction !== null}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 border border-slate-700 rounded-lg transition-colors"
+                >
+                  <RotateCw className={`w-3.5 h-3.5 ${busyAction === 'check' ? 'animate-spin' : ''}`} />
+                  <span>{busyAction === 'check' ? 'Checking...' : 'Check Updates'}</span>
+                </button>
 
-            <button
-              onClick={handleCheckUpdatesClick}
-              disabled={busyAction !== null}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 border border-slate-700 rounded-lg transition-colors"
-            >
-              <RotateCw className={`w-3.5 h-3.5 ${busyAction === 'check' ? 'animate-spin' : ''}`} />
-              <span>{busyAction === 'check' ? 'Checking...' : 'Check Updates'}</span>
-            </button>
+                <button
+                  onClick={() => setShowHistoryModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-300 hover:text-white bg-amber-950/40 hover:bg-amber-900/60 border border-amber-800/60 rounded-lg transition-colors"
+                >
+                  <History className="w-3.5 h-3.5" />
+                  <span>Rollback History ({transactions.length})</span>
+                </button>
 
-            <button
-              onClick={() => setShowHistoryModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-300 hover:text-white bg-amber-950/40 hover:bg-amber-900/60 border border-amber-800/60 rounded-lg transition-colors"
-            >
-              <History className="w-3.5 h-3.5" />
-              <span>Rollback History ({transactions.length})</span>
-            </button>
-
-            <button
-              onClick={handleUpdateAllClick}
-              disabled={busyAction !== null}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-lg transition-colors shadow-sm"
-            >
-              <RotateCw className={`w-3.5 h-3.5 ${busyAction === 'update' ? 'animate-spin' : ''}`} />
-              <span>{busyAction === 'update' ? 'Updating...' : 'Update All Installed'}</span>
-            </button>
+                <button
+                  onClick={handleUpdateAllClick}
+                  disabled={busyAction !== null}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-lg transition-colors shadow-sm"
+                >
+                  <RotateCw className={`w-3.5 h-3.5 ${busyAction === 'update' ? 'animate-spin' : ''}`} />
+                  <span>{busyAction === 'update' ? 'Updating...' : 'Update All Installed'}</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -282,39 +289,7 @@ export function RegistryView({
         </div>
       )}
 
-      {/* Sub-Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-800/80 pb-3">
-        <button
-          onClick={() => setActiveSubTab('browse')}
-          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-            activeSubTab === 'browse'
-              ? 'bg-indigo-600 text-white'
-              : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
-          }`}
-        >
-          <Download className="w-3.5 h-3.5" />
-          <span>Browse &amp; Install ({filteredRegistry.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveSubTab('updates')}
-          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-            activeSubTab === 'updates'
-              ? 'bg-indigo-600 text-white'
-              : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
-          }`}
-        >
-          <RotateCw className="w-3.5 h-3.5" />
-          <span>Updates &amp; Rollback</span>
-          {updatesAvailableCount > 0 && (
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold bg-amber-500 text-slate-950">
-              {updatesAvailableCount}
-            </span>
-          )}
-        </button>
-      </div>
-
-      {activeSubTab === 'browse' && (
+      {mode === 'browse' && (
         <>
           {/* Filter and Search Bar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
@@ -449,7 +424,7 @@ export function RegistryView({
         </>
       )}
 
-      {activeSubTab === 'updates' && (
+      {mode === 'updates' && (
         <div className="space-y-6">
           {/* Summary Strip */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
