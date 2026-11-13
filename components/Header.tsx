@@ -12,6 +12,7 @@ import {
   Terminal,
 } from 'lucide-react';
 import { SentinelLogo } from './SentinelLogo';
+import pkg from '../package.json';
 
 export type ActiveTab =
   | 'inspector'
@@ -72,6 +73,9 @@ export function Header({
             <div className="flex items-baseline gap-2">
               <span className="text-sm font-semibold tracking-tight text-white whitespace-nowrap">
                 ComfyNode Sentinel
+              </span>
+              <span className="px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700/80 text-[10px] font-mono text-indigo-300">
+                v{pkg.version}
               </span>
               <span className="hidden sm:inline text-[10px] text-slate-500 font-mono">
                 {isTauri ? 'Desktop' : 'Standalone'}

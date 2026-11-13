@@ -1,37 +1,38 @@
-# ComfyNode Sentinel — ComfyUI Node Manager & Desktop Companion
+# ComfyNode Sentinel — Standalone ComfyUI Custom Nodes Manager
 
-> Production-grade desktop companion and custom node management suite for ComfyUI. Built with Tauri v2 (Rust async runtime) architecture and a Next.js 15 App Router web console with offline inspection, FIFO pip dependency queuing, the "Torch Shield", 3-way lockfile reconciliation (`comfy-lock.json`), and static Python AST health linting.
+> Standalone desktop and web companion for managing ComfyUI custom nodes, dependencies, models, and environment health. Built with Next.js 15 App Router (standalone Node.js API routes for real filesystem, `git`, `pip`, and process streaming) and Tauri v2 (Rust desktop shell).
 
 ---
 
-## 📊 Implementation Progress Tracker
+## ✨ Key Features
 
-| Phase | Milestone | Scope & Deliverables | Status | Completion |
-| :--- | :--- | :--- | :---: | :---: |
-| **Phase 0** | **Scaffolding & Setup Wizard** | Environment auto-detection (`main.py`, `custom_nodes/`), Python binary discovery (Windows Portable `python_embeded`, venv, system `PATH`), and settings persistence. | ✅ Done | **100%** |
-| **Phase 1** | **Local Inspector (Offline MVP)** | Disk scan, git commit/branch extraction, instant state toggle (`Folder` $\leftrightarrow$ `Folder.disabled`), safe trash quarantine, and high-density inventory table. | ✅ Done | **100%** |
-| **Phase 2** | **Command Runner & Shield** | PTY streaming terminal log runner, single-threaded FIFO pip queue, and the interactive **"Torch Shield"** interceptor preventing PyTorch overwrites. | ✅ Done | **100%** |
-| **Phase 3** | **Ingestion Channels** | Curated community registry (25+ nodes), direct Git clone modal with branch overrides, batch URL importer (`nodes.txt`), and batch update runner. | ✅ Done | **100%** |
-| **Phase 4** | **Lockfile & Sync Engine** | `comfy-lock.json` generator & parser, plain `urls.txt` exporter, and 3-way reconciliation engine (clone missing, checkout commits, toggle states). | ✅ Done | **100%** |
-| **Phase 5** | **Names & Health Doctor** | Virtual display names (`aliases.json`), Folder Normalizer tool (`ComfyUI-[Name]`), and Python static AST linter with 1-click auto-patcher. | ✅ Done | **100%** |
-| **Phase 6** | **Profiles & Pre-Flight** | Sub-2-second workspace profiles ("Flux & High VRAM", "AnimateDiff", "Portrait Master") and binary PNG chunk decoder extracting embedded ComfyUI workflows. | ✅ Done | **100%** |
-| **Phase 7** | **Packaging & Issue Exporter** | Cross-platform abstractions, persistent error logging, and automated issue provisioners for GitHub CLI (`gh`), Linear CSV, and Notion Markdown. | ✅ Done | **100%** |
+- **Desktop App Shell**: Compact `48px` top utility bar with live connection status, Torch Shield indicator, Rescan, Launch ComfyUI, `220px` grouped left navigation rail (**Core**, **Diagnostics**, **System**), non-blocking toast notifications, and a collapsible Console quick-peek drawer.
+- **First-Run Onboarding**: Guided ComfyUI folder setup card when `comfyRoot` is not yet configured on disk.
+- **Installed Nodes Inspector**: Real `custom_nodes/` disk scanning, git commit/branch extraction, atomic enable/disable (`Folder` ↔ `Folder.disabled`), `.sentinel_trash` soft-quarantine & restore, Folder Normalizer, and collapsible Storage Charts.
+- **Install & Browse**: Curated community registry, direct `git clone --depth 1` via URL/branch, and batch URL import.
+- **Updates & Rollback**: Parallelized `git fetch` remote checking, live progress bar, `Last Updated` tracking, single-node and batch `git pull`, and 1-click `git checkout` rollback history.
+- **Command Runner & "Torch Shield"**: Real streaming `child_process.spawn` NDJSON console with Abort support, strict FIFO sequential `pip` queue, and automatic detection/stripping of `torch` / `torchvision` / `torchaudio` overrides.
+- **Health Doctor & Conflict Matrix**: Reads and auto-patches real `.py` files on disk for hardcoded paths and broken cross-imports, and detects conflicting `requirements.txt` constraints across installed nodes.
+- **Missing Nodes & Profiles**: Binary PNG/JSON workflow metadata decoder that resolves missing node classes against the community registry, plus workspace profile switching on disk.
+- **Models & VRAM Studio**: Scans `models/{checkpoints,loras,controlnet,vae,upscale_models}` with fast partial SHA-256 fingerprinting, replaces duplicate weights with OS symlinks, and estimates workflow VRAM.
+- **Sync & Backup**: `comfy-lock.json` export/import and real 3-way reconciliation on disk.
 
 ---
 
 ## 🛠️ Technical Architecture
 
-### 1. App Shell & Backend Strategy
-* **App Shell:** Tauri v2 (Rust `tokio` async runtime).
-* **Process Management:** `tokio::process::Command` streaming lines to frontend via Tauri event channel `app.emit("log-output", { id, line })`.
-* **Filesystem Safety:** Atomic directory renaming for state toggles and soft-quarantine utilizing the `trash` crate.
-* **Persistent Preferences:** `tauri-plugin-store` serializing user configurations into `settings.json` and `aliases.json`.
+### 1. Backend & Desktop Strategy
+* **Standalone Server API (`app/api/*`)**:
+  * `/api/environment` — Validates `main.py`, `custom_nodes/`, and detects embedded/venv/system Python.
+  * `/api/nodes/scan` — Scans `custom_nodes/` & `.sentinel_trash/`, reads `requirements.txt`, and lints `.py` files.
+  * `/api/nodes/action` — Executes real `toggle`, `uninstall`, `restore`, `normalize`, `clone`, `check_updates`, `update`, `rollback`, `read_file`, and `patch_file`.
+  * `/api/models/scan` & `/api/models/deduplicate` — Fast partial SHA-256 duplicate detection and OS symlink creation.
+  * `/api/exec` — Streams real `pip` and shell command output as NDJSON with `AbortSignal` support.
+* **Desktop Shell**: Tauri v2 (`src-tauri/`) with native Windows/macOS/Linux bundling and official Sentinel Node Shield icons (`app/icon.svg`, `src-tauri/icons/`).
 
 ### 2. Frontend Layer
-* **Framework:** Next.js 15+ App Router, React 19, TypeScript 5.9.
-* **Styling:** Tailwind CSS v4, dark-slate UI aesthetic following high-density SaaS dashboard specifications.
-* **Icons:** `lucide-react` affordance-only icons.
-* **Typography:** Modern geometric sans display paired with monospace tabular figures (`font-mono tabular-nums`).
+* **Framework**: Next.js 15 App Router (`output: 'standalone'`), React 19, TypeScript 5.
+* **Styling**: Tailwind CSS v4, dark-slate studio aesthetic (`#070a10` / `#0b0f17`), `lucide-react` icons, and `font-mono tabular-nums` metrics.
 
 ---
 
@@ -134,7 +135,7 @@ async fn batch_normalize_folders(replacements: Vec<FolderRenamePair>) -> Result<
 
 ---
 
-## 🚀 Running the Applet
+## 🚀 Running the App
 
 ```bash
 # Install dependencies
@@ -143,9 +144,16 @@ npm install
 # Start Next.js development server on port 3000
 npm run dev
 
-# Run compilation check
+# Run unit tests (Vitest)
+npm test
+
+# Run typecheck & linting
+npx tsc --noUnusedLocals --noUnusedParameters --noEmit
+npm run lint
+
+# Build production standalone bundle
 npm run build
 
-# Run linting check
-npm run lint
+# Run Tauri desktop app (requires Rust toolchain)
+npx tauri dev
 ```

@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { ActiveTab } from './Header';
+import pkg from '../package.json';
 
 interface SidebarProps {
   activeTab: ActiveTab;
@@ -174,6 +175,13 @@ export function Sidebar({
           </div>
         </div>
       ))}
+
+      <div className="mt-auto pt-4 px-3 border-t border-slate-800/70 flex items-center justify-between text-[10px] font-mono text-slate-500">
+        <span>Version</span>
+        <span className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300">
+          v{pkg.version}
+        </span>
+      </div>
     </div>
   );
 
