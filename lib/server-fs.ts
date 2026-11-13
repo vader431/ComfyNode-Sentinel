@@ -1,4 +1,5 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import crypto from 'crypto';
 import { execFile } from 'child_process';
@@ -22,11 +23,22 @@ export function resolveSafeSubpath(baseDir: string, ...segments: string[]): stri
 /**
  * Validates a ComfyUI root directory on disk.
  */
+export function expandHomeDir(inputPath: string): string {
+  const trimmed = inputPath.trim();
+  if (trimmed === '~') {
+    return os.homedir();
+  }
+  if (trimmed.startsWith('~/') || trimmed.startsWith('~\\')) {
+    return path.join(os.homedir(), trimmed.slice(2));
+  }
+  return trimmed;
+}
+
 export async function validateComfyEnvironment(
   comfyRoot: string,
   requestedPython?: string
 ) {
-  const trimmedRoot = comfyRoot.trim();
+  const trimmedRoot = expandHomeDir(comfyRoot);
   if (!trimmedRoot) {
     return {
       isValidRoot: false,

@@ -15,6 +15,7 @@ const PRESET_PATHS = [
   'C:\\AI\\ComfyUI_windows_portable\\ComfyUI',
   'C:\\ComfyUI',
   'D:\\ComfyUI',
+  '~/ComfyUI',
 ];
 
 export function OnboardingCard({
