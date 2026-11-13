@@ -140,8 +140,7 @@ package:linux:
     key:
       files:
         - package-lock.json
-        - bun.lock
-        - src-tauri/Cargo.toml
+        - src-tauri/Cargo.lock
     paths:
       - .npm/
       - .cargo/
