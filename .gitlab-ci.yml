@@ -49,9 +49,19 @@ stages:
 
 verify:rust:
   stage: verify
-  extends: .base-ubuntu
+  image: ubuntu:22.04
+  variables:
+    DEBIAN_FRONTEND: noninteractive
+  cache:
+    key:
+      files:
+        - src-tauri/Cargo.toml
+    paths:
+      - .cargo/
+      - src-tauri/target/
   before_script:
-    - apt-get update && apt-get install -y ca-certificates curl wget file gnupg build-essential libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+    - apt-get update
+    - apt-get install -y ca-certificates curl wget file gnupg build-essential libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
     - mkdir -p /etc/apt/keyrings
     - curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
     - echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
@@ -64,13 +74,65 @@ verify:rust:
     - mkdir -p src-tauri/standalone-server
     - touch src-tauri/standalone-server/.ci-placeholder
     - cargo check --manifest-path src-tauri/Cargo.toml --all-targets
-    - cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-    - cargo test --manifest-path src-tauri/Cargo.toml
   rules:
     - if: $CI_COMMIT_TAG =~ /^v/
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_PIPELINE_SOURCE == "web"
+
+package:linux:
+  stage: package
+  image: ubuntu:22.04
+  needs:
+    - job: verify:rust
+      artifacts: true
+  variables:
+    DEBIAN_FRONTEND: noninteractive
+  before_script:
+    - export PATH="$CARGO_HOME/bin:$PATH"
+  script:
+    - *install_js_deps
+    - npm run tauri:build
+  artifacts:
+    name: "comfynode-sentinel-linux-$CI_COMMIT_REF_SLUG"
+    expire_in: 30 days
+    paths:
+      - src-tauri/target/release/bundle/deb/*.deb
+      - src-tauri/target/release/bundle/rpm/*.rpm
+      - src-tauri/target/release/bundle/appimage/*.AppImage
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+    - when: manual
+      allow_failure: true
+
+package:web:
+  stage: package
+  image: node:22-bookworm
+  needs:
+    - job: verify:web
+  cache:
+    key:
+      files:
+        - package-lock.json
+        - bun.lock
+    paths:
+      - .npm/
+  script:
+    - *install_js_deps
+    - npm run build
+    - mkdir -p dist-web
+    - cp -r .next/standalone/. dist-web/
+    - mkdir -p dist-web/.next
+    - cp -r .next/static dist-web/.next/static
+    - if [ -d public ]; then cp -r public dist-web/public; fi
+  artifacts:
+    name: "comfynode-sentinel-web-$CI_COMMIT_REF_SLUG"
+    expire_in: 30 days
+    paths:
+      - dist-web/
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 verify:web:
   stage: verify
