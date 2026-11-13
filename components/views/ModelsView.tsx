@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   HardDrive,
   Cpu,
@@ -10,6 +10,7 @@ import {
   FolderSync,
   Sparkles,
   Info,
+  RefreshCw,
 } from 'lucide-react';
 import {
   ModelAsset,
@@ -21,16 +22,20 @@ import {
   analyzeModelDuplicates,
   estimateVramRequirements,
   generateSymlinkScript,
-  INITIAL_MODEL_ASSETS,
 } from '../../lib/model-manager';
+import { scanModelsReal, deduplicateModelsReal } from '../../lib/system-client';
 
 interface ModelsViewProps {
+  comfyRoot: string;
+  isValidRoot: boolean;
   onRunTerminalCommand?: (cmd: string) => void;
 }
 
-export function ModelsView({ onRunTerminalCommand }: ModelsViewProps) {
+export function ModelsView({ comfyRoot, isValidRoot, onRunTerminalCommand }: ModelsViewProps) {
   const [activeSubTab, setActiveSubTab] = useState<'storage' | 'vram'>('storage');
-  const [models, setModels] = useState<ModelAsset[]>(INITIAL_MODEL_ASSETS);
+  const [models, setModels] = useState<ModelAsset[]>([]);
+  const [isScanning, setIsScanning] = useState<boolean>(false);
+  const [scanError, setScanError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<ModelCategory | 'all'>('all');
   const [copiedGroupHash, setCopiedGroupHash] = useState<string | null>(null);
 
@@ -43,6 +48,34 @@ export function ModelsView({ onRunTerminalCommand }: ModelsViewProps) {
     loraCount: 1,
     controlNetCount: 0,
   });
+
+  const refreshModels = useCallback(async () => {
+    if (!isValidRoot || !comfyRoot) {
+      setModels([]);
+      return;
+    }
+    setIsScanning(true);
+    setScanError(null);
+    try {
+      const res = await scanModelsReal(comfyRoot);
+      if (res.error) {
+        setScanError(res.error);
+      } else {
+        setModels(res.models);
+      }
+    } catch (err) {
+      setScanError(err instanceof Error ? err.message : 'Failed to scan models directory');
+    } finally {
+      setIsScanning(false);
+    }
+  }, [comfyRoot, isValidRoot]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void refreshModels();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [refreshModels]);
 
   const deduplication = analyzeModelDuplicates(models);
   const vramResult = estimateVramRequirements(vramParams);
@@ -61,31 +94,27 @@ export function ModelsView({ onRunTerminalCommand }: ModelsViewProps) {
     setTimeout(() => setCopiedGroupHash(null), 2000);
   };
 
-  const handleDeduplicateAsset = (groupHash: string) => {
-    // Keep the primary asset, mark secondary as symlink
-    setModels((prev) => {
-      let seenPrimary = false;
-      return prev.map((m) => {
-        if (m.hash === groupHash) {
-          if (!seenPrimary) {
-            seenPrimary = true;
-            return { ...m, isDuplicate: false };
-          }
-          return {
-            ...m,
-            isDuplicate: false,
-            isSymlink: true,
-            sizeGb: 0.001, // Reclaimed
-            symlinkTarget: `models/checkpoints/${m.fileName}`,
-          };
-        }
-        return m;
-      });
-    });
+  const handleDeduplicateAsset = async (groupHash: string) => {
+    const group = deduplication.duplicateGroups.find((g) => g.hash === groupHash);
+    if (!group || group.assets.length < 2) return;
 
+    const primaryAsset = group.assets[0];
+    const duplicateAssets = group.assets.slice(1);
+
+    const res = await deduplicateModelsReal(
+      comfyRoot,
+      primaryAsset.relativePath,
+      duplicateAssets.map((d) => d.relativePath)
+    );
+    if (!res.success) {
+      setScanError(res.error || 'Symlink deduplication failed');
+      return;
+    }
+
+    await refreshModels();
     if (onRunTerminalCommand) {
       onRunTerminalCommand(
-        `# Reclaimed disk space via symlink deduplication for group ${groupHash}`
+        `# Reclaimed disk space via OS symlink deduplication for ${primaryAsset.fileName}`
       );
     }
   };
@@ -104,7 +133,18 @@ export function ModelsView({ onRunTerminalCommand }: ModelsViewProps) {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 bg-slate-900/80 border border-slate-800 p-1 rounded-xl">
+        <div className="flex items-center gap-2">
+          {activeSubTab === 'storage' && (
+            <button
+              onClick={refreshModels}
+              disabled={isScanning || !isValidRoot}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800 disabled:opacity-50 transition-colors"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isScanning ? 'animate-spin' : ''}`} />
+              <span>{isScanning ? 'Scanning...' : 'Rescan Models'}</span>
+            </button>
+          )}
+          <div className="flex items-center gap-2 bg-slate-900/80 border border-slate-800 p-1 rounded-xl">
           <button
             onClick={() => setActiveSubTab('storage')}
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
@@ -127,12 +167,23 @@ export function ModelsView({ onRunTerminalCommand }: ModelsViewProps) {
             <Cpu className="w-3.5 h-3.5" />
             <span>Pre-flight VRAM Estimator</span>
           </button>
+          </div>
         </div>
       </div>
 
       {/* Tab 1: Storage & Deduplication */}
       {activeSubTab === 'storage' && (
         <div className="space-y-6">
+          {!isValidRoot && (
+            <div className="rounded-xl border border-amber-800/60 bg-amber-950/20 p-4 text-xs text-amber-200">
+              ComfyUI root directory is not configured or not found on disk. Set a valid ComfyUI path in Settings to scan your <code className="font-mono">models/</code> directory.
+            </div>
+          )}
+          {scanError && (
+            <div className="rounded-xl border border-rose-800/60 bg-rose-950/20 p-4 text-xs text-rose-200 font-mono">
+              {scanError}
+            </div>
+          )}
           {/* Metrics summary */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">

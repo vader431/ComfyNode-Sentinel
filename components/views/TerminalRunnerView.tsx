@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { PipQueueItem, TerminalLogEntry } from '@/types';
+import { streamExecReal } from '@/lib/system-client';
 
 interface TerminalRunnerViewProps {
   logs: TerminalLogEntry[];
@@ -23,6 +24,8 @@ interface TerminalRunnerViewProps {
   onEnqueuePip: (nodeName: string, requirements: string[]) => void;
   onResolveShield: (queueItemId: string, stripTorch: boolean) => void;
   autoTorchShield: boolean;
+  comfyRoot: string;
+  pythonBinary?: string;
   initialCommand?: string;
 }
 
@@ -34,6 +37,8 @@ export function TerminalRunnerView({
   onEnqueuePip,
   onResolveShield,
   autoTorchShield,
+  comfyRoot,
+  pythonBinary,
   initialCommand,
 }: TerminalRunnerViewProps) {
   const [commandInput, setCommandInput] = useState(initialCommand || '');
@@ -47,6 +52,7 @@ export function TerminalRunnerView({
   // Derived state directly from pipQueue
   const shieldActivePendingItem = pipQueue.find((item) => item.status === 'blocked_by_shield') || null;
   const terminalEndRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const displayedLogs = React.useMemo(() => {
     if (!logFilterQuery.trim()) return logs;
@@ -59,11 +65,26 @@ export function TerminalRunnerView({
     terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [displayedLogs]);
 
-  const handleRunCommand = () => {
+  const handleAbortCommand = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      onAddLog({
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'warn',
+        text: 'Command aborted by user.',
+      });
+      setIsRunning(false);
+    }
+  };
+
+  const handleRunCommand = async () => {
     if (!commandInput.trim() || isRunning) return;
 
-    setIsRunning(true);
     const cmd = commandInput.trim();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    setIsRunning(true);
 
     onAddLog({
       timestamp: new Date().toLocaleTimeString(),
@@ -71,42 +92,34 @@ export function TerminalRunnerView({
       text: `$ ${cmd}`,
     });
 
-    // Simulate async line streaming
-    setTimeout(() => {
-      onAddLog({
-        timestamp: new Date().toLocaleTimeString(),
-        type: 'stdout',
-        text: `Executing in C:\\AI\\ComfyUI_windows_portable\\ComfyUI...`,
-      });
-    }, 200);
-
-    setTimeout(() => {
-      if (cmd.includes('pip install')) {
+    try {
+      await streamExecReal(
+        {
+          command: cmd,
+          comfyRoot,
+          pythonBinary,
+        },
+        (line) => {
+          onAddLog({
+            timestamp: new Date().toLocaleTimeString(),
+            type: line.type,
+            text: line.text,
+          });
+        },
+        controller.signal
+      );
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') {
         onAddLog({
           timestamp: new Date().toLocaleTimeString(),
-          type: 'info',
-          text: `[Pip Queue Manager] Validating site-packages lock invariants...`,
-        });
-        onAddLog({
-          timestamp: new Date().toLocaleTimeString(),
-          type: 'stdout',
-          text: `Successfully resolved dependencies. Zero site-package lock contentions detected.`,
-        });
-      } else if (cmd.includes('git pull')) {
-        onAddLog({
-          timestamp: new Date().toLocaleTimeString(),
-          type: 'stdout',
-          text: `Updating 9a4c8e1..4f2b10a\nFast-forward\n requirements.txt | 2 +-\n 1 file changed, 1 insertion(+), 1 deletion(-)`,
-        });
-      } else {
-        onAddLog({
-          timestamp: new Date().toLocaleTimeString(),
-          type: 'stdout',
-          text: `Process finished with exit code 0.`,
+          type: 'stderr',
+          text: err instanceof Error ? err.message : 'Execution failed',
         });
       }
+    } finally {
+      abortControllerRef.current = null;
       setIsRunning(false);
-    }, 1000);
+    }
   };
 
   const handleTestRequirementsShield = () => {
@@ -310,18 +323,18 @@ export function TerminalRunnerView({
               className="flex-1 bg-transparent border-0 text-xs text-slate-100 placeholder-slate-600 focus:outline-none font-mono"
             />
             <button
-              onClick={handleRunCommand}
-              disabled={isRunning || !commandInput.trim()}
+              onClick={isRunning ? handleAbortCommand : handleRunCommand}
+              disabled={!isRunning && !commandInput.trim()}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                 isRunning
-                  ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                  : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm'
+                  ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-sm'
+                  : 'bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white shadow-sm'
               }`}
             >
               {isRunning ? (
                 <>
-                  <Square className="w-3 h-3 fill-current text-amber-400" />
-                  <span>Running</span>
+                  <Square className="w-3 h-3 fill-current" />
+                  <span>Abort</span>
                 </>
               ) : (
                 <>

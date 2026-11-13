@@ -5,12 +5,14 @@ import {
   FolderCheck,
   Cpu,
   CheckCircle2,
+  XCircle,
   RotateCcw,
   Check,
   ShieldCheck,
   Terminal,
 } from 'lucide-react';
 import { EnvironmentSettings } from '@/types';
+import { checkEnvironmentReal } from '@/lib/system-client';
 
 interface SettingsViewProps {
   settings: EnvironmentSettings;
@@ -29,37 +31,59 @@ export function SettingsView({
   const [autoShield, setAutoShield] = useState(settings.autoTorchShield);
   const [cleanNames, setCleanNames] = useState(settings.showCleanNames);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [isChecking, setIsChecking] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [pythonVersion, setPythonVersion] = useState<string>('');
 
-  const handleValidateAndSave = (e: React.FormEvent) => {
+  const handleValidateAndSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsChecking(true);
+    setValidationError(null);
 
-    const isValid = Boolean(comfyRootInput.trim() && pythonBinaryInput.trim());
-    const updated: EnvironmentSettings = {
-      comfyRoot: comfyRootInput.trim(),
-      pythonBinary: pythonBinaryInput.trim(),
-      pythonType: pythonTypeInput,
-      isValidRoot: isValid,
-      hasMainPy: true,
-      hasCustomNodes: true,
-      showCleanNames: cleanNames,
-      autoTorchShield: autoShield,
-    };
+    try {
+      const check = await checkEnvironmentReal(comfyRootInput.trim(), pythonBinaryInput.trim());
+      if (check.pythonVersion) setPythonVersion(check.pythonVersion);
+      if (check.error) setValidationError(check.error);
 
-    onUpdateSettings(updated);
-    setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 2000);
+      const updated: EnvironmentSettings = {
+        comfyRoot: comfyRootInput.trim(),
+        pythonBinary: pythonBinaryInput.trim() || check.detectedPython,
+        pythonType: pythonTypeInput,
+        isValidRoot: check.isValidRoot,
+        hasMainPy: check.hasMainPy,
+        hasCustomNodes: check.hasCustomNodes,
+        showCleanNames: cleanNames,
+        autoTorchShield: autoShield,
+      };
+
+      onUpdateSettings(updated);
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 2000);
+    } catch (err) {
+      setValidationError(err instanceof Error ? err.message : 'Validation failed');
+    } finally {
+      setIsChecking(false);
+    }
   };
 
-  const handleAutoDetectPython = (type: EnvironmentSettings['pythonType']) => {
+  const handleAutoDetectPython = async (type: EnvironmentSettings['pythonType']) => {
     setPythonTypeInput(type);
     const root = comfyRootInput.trim() || 'C:\\AI\\ComfyUI_windows_portable\\ComfyUI';
 
     if (type === 'windows_portable') {
-      setPythonBinaryInput('C:\\AI\\ComfyUI_windows_portable\\python_embeded\\python.exe');
+      const parent = root.replace(/[\\/]+ComfyUI[\\/]?$/i, '');
+      setPythonBinaryInput(`${parent}\\python_embeded\\python.exe`);
     } else if (type === 'virtualenv') {
       setPythonBinaryInput(`${root}\\venv\\Scripts\\python.exe`);
     } else if (type === 'system') {
       setPythonBinaryInput('python');
+    }
+
+    const check = await checkEnvironmentReal(root);
+    if (check.detectedPython) {
+      setPythonBinaryInput(check.detectedPython);
+      setPythonVersion(check.pythonVersion);
+      if (check.pythonType) setPythonTypeInput(check.pythonType);
     }
   };
 
@@ -107,16 +131,22 @@ export function SettingsView({
                 onChange={(e) => setComfyRootInput(e.target.value)}
                 className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
               />
-              <div className="flex items-center gap-4 mt-2 text-[11px] text-slate-400 font-mono">
-                <span className="flex items-center gap-1 text-emerald-400">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>main.py exists</span>
+              <div className="flex flex-wrap items-center gap-4 mt-2 text-[11px] font-mono">
+                <span className={`flex items-center gap-1 ${settings.hasMainPy ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {settings.hasMainPy ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
+                  <span>{settings.hasMainPy ? 'main.py exists' : 'main.py not found'}</span>
                 </span>
-                <span className="flex items-center gap-1 text-emerald-400">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>custom_nodes/ exists</span>
+                <span className={`flex items-center gap-1 ${settings.hasCustomNodes ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {settings.hasCustomNodes ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
+                  <span>{settings.hasCustomNodes ? 'custom_nodes/ exists' : 'custom_nodes/ not found'}</span>
                 </span>
+                {pythonVersion && (
+                  <span className="text-sky-400">Python: {pythonVersion}</span>
+                )}
               </div>
+              {validationError && (
+                <p className="text-xs text-rose-400 mt-1.5 font-mono">{validationError}</p>
+              )}
             </div>
           </div>
 
@@ -250,9 +280,10 @@ export function SettingsView({
             )}
             <button
               type="submit"
-              className="px-5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg shadow-sm transition-colors"
+              disabled={isChecking}
+              className="px-5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-lg shadow-sm transition-colors"
             >
-              Save Environment Configuration
+              {isChecking ? 'Validating on Disk...' : 'Save Environment Configuration'}
             </button>
           </div>
         </form>

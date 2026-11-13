@@ -9,11 +9,9 @@ import {
 } from '@/types';
 import {
   INITIAL_ROADMAP_TASKS,
-  INITIAL_INSTALLED_NODES,
   INITIAL_PROFILES,
   DEFAULT_SETTINGS,
 } from './default-data';
-import { INITIAL_UPDATE_TRANSACTIONS } from './transaction-history';
 
 const STORAGE_KEYS = {
   TASKS: 'comfynode_tasks_v2',
@@ -54,7 +52,7 @@ export const StorageService = {
   getTasks: (): RoadmapTask[] => getStoredItem(STORAGE_KEYS.TASKS, INITIAL_ROADMAP_TASKS),
   setTasks: (tasks: RoadmapTask[]): void => setStoredItem(STORAGE_KEYS.TASKS, tasks),
 
-  getNodes: (): InstalledNode[] => getStoredItem(STORAGE_KEYS.NODES, INITIAL_INSTALLED_NODES),
+  getNodes: (): InstalledNode[] => getStoredItem(STORAGE_KEYS.NODES, []),
   setNodes: (nodes: InstalledNode[]): void => setStoredItem(STORAGE_KEYS.NODES, nodes),
 
   getTrash: (): InstalledNode[] => getStoredItem(STORAGE_KEYS.TRASH, []),
@@ -84,17 +82,11 @@ export const StorageService = {
       id: 'init-log-1',
       timestamp: '00:00:01',
       type: 'info',
-      text: 'ComfyNode Sentinel Daemon v2.1 initialized on port 3000.',
+      text: 'ComfyNode Sentinel initialized.',
     },
     {
       id: 'init-log-2',
       timestamp: '00:00:02',
-      type: 'info',
-      text: 'ComfyUI environment detected: C:\\AI\\ComfyUI_windows_portable\\ComfyUI',
-    },
-    {
-      id: 'init-log-3',
-      timestamp: '00:00:03',
       type: 'shield',
       text: 'Torch Shield activated: PyTorch overwrite protection active (Strict Mode).',
     },
@@ -109,7 +101,7 @@ export const StorageService = {
   setPipQueue: (queue: PipQueueItem[]): void => setStoredItem(STORAGE_KEYS.PIP_QUEUE, queue),
 
   getTransactions: (): UpdateTransaction[] =>
-    getStoredItem(STORAGE_KEYS.TRANSACTIONS, INITIAL_UPDATE_TRANSACTIONS),
+    getStoredItem(STORAGE_KEYS.TRANSACTIONS, []),
   setTransactions: (txs: UpdateTransaction[]): void =>
     setStoredItem(STORAGE_KEYS.TRANSACTIONS, txs),
 

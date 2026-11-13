@@ -779,9 +779,9 @@ export const DEFAULT_SETTINGS: EnvironmentSettings = {
   comfyRoot: 'C:\\AI\\ComfyUI_windows_portable\\ComfyUI',
   pythonBinary: 'C:\\AI\\ComfyUI_windows_portable\\python_embeded\\python.exe',
   pythonType: 'windows_portable',
-  isValidRoot: true,
-  hasMainPy: true,
-  hasCustomNodes: true,
+  isValidRoot: false,
+  hasMainPy: false,
+  hasCustomNodes: false,
   showCleanNames: true,
   autoTorchShield: true,
 };

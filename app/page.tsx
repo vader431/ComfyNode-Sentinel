@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useSyncExternalStore } from 'react';
+import React, { useState, useEffect, useCallback, useSyncExternalStore } from 'react';
 import { Header, ActiveTab } from '@/components/Header';
 import { StatusBar } from '@/components/StatusBar';
 import { ExportModal } from '@/components/ExportModal';
@@ -19,13 +19,20 @@ import {
   recordTransaction,
   rollbackTransaction,
 } from '@/lib/transaction-history';
+import { isTauriEnvironment } from '@/lib/tauri-bridge';
 import {
-  isTauriEnvironment,
-  nativeCheckEnvironment,
-  nativeToggleNodeState,
-  nativeQuarantineNodeToTrash,
-  nativeScanCustomNodes,
-} from '@/lib/tauri-bridge';
+  checkEnvironmentReal,
+  scanNodesReal,
+  toggleNodeStateReal,
+  uninstallNodeReal,
+  restoreNodeReal,
+  normalizeNodeReal,
+  cloneNodeReal,
+  checkUpdatesReal,
+  updateNodeReal,
+  rollbackNodeReal,
+  streamExecReal,
+} from '@/lib/system-client';
 import {
   RoadmapTask,
   InstalledNode,
@@ -67,6 +74,8 @@ export default function Home() {
   const [logs, setLogs] = useState<TerminalLogEntry[]>(() => StorageService.getLogs());
   const [pipQueue, setPipQueue] = useState<PipQueueItem[]>(() => StorageService.getPipQueue());
   const [transactions, setTransactions] = useState<UpdateTransaction[]>(() => StorageService.getTransactions());
+  const [scannedRequirementsMap, setScannedRequirementsMap] = useState<Record<string, string[]>>({});
+  const [setupBannerDismissed, setSetupBannerDismissed] = useState(false);
 
   const addLog = (entry: Omit<TerminalLogEntry, 'id'>) => {
     const newEntry: TerminalLogEntry = {
@@ -121,22 +130,47 @@ export default function Home() {
     StorageService.setSettings(newSettings);
   };
 
-  // Tauri live environment scanner on startup
-  useEffect(() => {
-    if (!isClient) return;
-    if (isTauriEnvironment() && settings.comfyRoot) {
-      const customNodesPath = `${settings.comfyRoot}\\custom_nodes`;
-      nativeScanCustomNodes(customNodesPath).then((discovered) => {
-        if (discovered && discovered.length > 0) {
-          addLog({
-            timestamp: new Date().toLocaleTimeString(),
-            type: 'info',
-            text: `[Tauri Desktop Shell] Scanned ${discovered.length} live custom_nodes from ${customNodesPath}.`,
-          });
-        }
+  const performFullScan = useCallback(async (comfyRoot: string, pythonBinary?: string) => {
+    if (!comfyRoot) return;
+    try {
+      const env = await checkEnvironmentReal(comfyRoot, pythonBinary);
+      setSettings((prev) => {
+        const next: EnvironmentSettings = {
+          ...prev,
+          comfyRoot,
+          pythonBinary: pythonBinary ?? prev.pythonBinary,
+          isValidRoot: env.isValidRoot,
+          hasMainPy: env.hasMainPy,
+          hasCustomNodes: env.hasCustomNodes,
+        };
+        StorageService.setSettings(next);
+        return next;
       });
+
+      if (env.isValidRoot) {
+        const scan = await scanNodesReal(comfyRoot);
+        if (!scan.error) {
+          setNodes(scan.nodes);
+          StorageService.setNodes(scan.nodes);
+          setTrashNodes(scan.trashNodes);
+          StorageService.setTrash(scan.trashNodes);
+          setScannedRequirementsMap(scan.requirementsMap);
+        }
+      }
+    } catch {
+      // Ignore startup network errors if backend is still initializing
     }
-  }, [isClient, settings.comfyRoot]);
+  }, []);
+
+  // Live environment & custom_nodes scanner on startup
+  useEffect(() => {
+    if (!isClient || !settings.comfyRoot) return;
+    const timer = setTimeout(() => {
+      void performFullScan(settings.comfyRoot, settings.pythonBinary);
+    }, 0);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isClient]);
 
   // Task handlers
   const handleToggleTask = (taskId: string) => {
@@ -151,25 +185,23 @@ export default function Home() {
 
   // Node Inspector Handlers
   const handleToggleNodeState = async (folderName: string) => {
-    if (isTauriEnvironment() && settings.comfyRoot) {
-      const customNodesPath = `${settings.comfyRoot}\\custom_nodes`;
-      const renamed = await nativeToggleNodeState(customNodesPath, folderName);
-      if (renamed) {
-        addLog({
-          timestamp: new Date().toLocaleTimeString(),
-          type: 'success',
-          text: `[Tauri Native] Renamed directory on disk to ${renamed}`,
-        });
-      }
+    const res = await toggleNodeStateReal(settings.comfyRoot, folderName);
+    if (!res.success) {
+      addLog({
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'stderr',
+        text: `[Toggle Error] ${res.error || 'Failed to rename node folder on disk'}`,
+      });
+      return;
     }
 
     const updated = nodes.map((n) => {
       if (n.folderName === folderName) {
-        const nextState = !n.enabled;
+        const nextState = typeof res.enabled === 'boolean' ? res.enabled : !n.enabled;
         addLog({
           timestamp: new Date().toLocaleTimeString(),
           type: 'info',
-          text: `[Atomic Rename] custom_nodes/${n.folderName} <-> custom_nodes/${n.folderName}${
+          text: `[Atomic Rename] custom_nodes/${n.folderName} -> custom_nodes/${n.folderName}${
             nextState ? '' : '.disabled'
           }`,
         });
@@ -184,16 +216,14 @@ export default function Home() {
     const target = nodes.find((n) => n.folderName === folderName);
     if (!target) return;
 
-    if (isTauriEnvironment() && settings.comfyRoot) {
-      const customNodesPath = `${settings.comfyRoot}\\custom_nodes`;
-      const trashed = await nativeQuarantineNodeToTrash(customNodesPath, folderName);
-      if (trashed) {
-        addLog({
-          timestamp: new Date().toLocaleTimeString(),
-          type: 'success',
-          text: `[Tauri Native Trash] custom_nodes/${folderName} moved to OS Recycle Bin.`,
-        });
-      }
+    const res = await uninstallNodeReal(settings.comfyRoot, folderName);
+    if (!res.success) {
+      addLog({
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'stderr',
+        text: `[Uninstall Error] ${res.error || 'Failed to move node to .sentinel_trash'}`,
+      });
+      return;
     }
 
     const remainingNodes = nodes.filter((n) => n.folderName !== folderName);
@@ -205,31 +235,30 @@ export default function Home() {
     addLog({
       timestamp: new Date().toLocaleTimeString(),
       type: 'warn',
-      text: `[Safe Uninstall (trash)] Moved custom_nodes/${folderName} to system trash quarantine.`,
+      text: `[Safe Uninstall] Moved custom_nodes/${folderName} to .sentinel_trash quarantine.`,
     });
   };
 
   const handleUpdateSettings = async (newSettings: EnvironmentSettings) => {
-    const validated = { ...newSettings };
-    if (isTauriEnvironment() && newSettings.comfyRoot) {
-      const check = await nativeCheckEnvironment(newSettings.comfyRoot);
-      if (check) {
-        validated.isValidRoot = check.is_valid;
-        validated.hasMainPy = check.has_main_py;
-        validated.hasCustomNodes = check.has_custom_nodes;
-        addLog({
-          timestamp: new Date().toLocaleTimeString(),
-          type: check.is_valid ? 'success' : 'warn',
-          text: `[Tauri Native Validation] ${newSettings.comfyRoot} - valid root: ${check.is_valid}`,
-        });
-      }
+    updateSettings(newSettings);
+    if (newSettings.isValidRoot) {
+      await performFullScan(newSettings.comfyRoot, newSettings.pythonBinary);
     }
-    updateSettings(validated);
   };
 
-  const handleRestoreNode = (folderName: string) => {
+  const handleRestoreNode = async (folderName: string) => {
     const target = trashNodes.find((t) => t.folderName === folderName);
     if (!target) return;
+
+    const res = await restoreNodeReal(settings.comfyRoot, folderName);
+    if (!res.success) {
+      addLog({
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'stderr',
+        text: `[Restore Error] ${res.error || 'Failed to restore node from .sentinel_trash'}`,
+      });
+      return;
+    }
 
     const remainingTrash = trashNodes.filter((t) => t.folderName !== folderName);
     const newNodes = [...nodes, target];
@@ -240,7 +269,7 @@ export default function Home() {
     addLog({
       timestamp: new Date().toLocaleTimeString(),
       type: 'success',
-      text: `[Restored] custom_nodes/${folderName} restored from trash.`,
+      text: `[Restored] custom_nodes/${folderName} restored from .sentinel_trash.`,
     });
   };
 
@@ -254,18 +283,32 @@ export default function Home() {
     });
   };
 
-  const handleNormalizeBatch = (replacements: { original: string; proposed: string }[]) => {
-    const updated = nodes.map((n) => {
-      const match = replacements.find((r) => r.original === n.folderName);
-      if (match) {
+  const handleNormalizeBatch = async (replacements: { original: string; proposed: string }[]) => {
+    const succeeded = new Map<string, string>();
+    for (const r of replacements) {
+      const res = await normalizeNodeReal(settings.comfyRoot, r.original, r.proposed);
+      if (res.success) {
+        succeeded.set(r.original, r.proposed);
         addLog({
           timestamp: new Date().toLocaleTimeString(),
           type: 'info',
-          text: `[Normalizer] std::fs::rename custom_nodes/${match.original} -> custom_nodes/${match.proposed}`,
+          text: `[Normalizer] Renamed custom_nodes/${r.original} -> custom_nodes/${r.proposed}`,
         });
+      } else {
+        addLog({
+          timestamp: new Date().toLocaleTimeString(),
+          type: 'stderr',
+          text: `[Normalizer Error] ${r.original}: ${res.error || 'Rename failed'}`,
+        });
+      }
+    }
+
+    const updated = nodes.map((n) => {
+      const nextName = succeeded.get(n.folderName);
+      if (nextName) {
         return {
           ...n,
-          folderName: match.proposed,
+          folderName: nextName,
           normalizedProposedName: undefined,
         };
       }
@@ -351,85 +394,85 @@ export default function Home() {
     );
   };
 
-  const processPipQueue = (queueId: string, requirements: string[]) => {
-    setTimeout(() => {
-      addLog({
-        timestamp: new Date().toLocaleTimeString(),
-        type: 'stdout',
-        text: `pip install ${requirements.join(' ')} --no-cache-dir`,
-      });
-      addLog({
-        timestamp: new Date().toLocaleTimeString(),
-        type: 'success',
-        text: `Successfully installed dependencies for job ${queueId}. Pip process completed cleanly.`,
-      });
-
+  const processPipQueue = async (queueId: string, requirements: string[]) => {
+    if (requirements.length === 0) {
       setPipQueue((prev) =>
         prev.map((item) => (item.id === queueId ? { ...item, status: 'completed' } : item))
       );
-    }, 1200);
+      return;
+    }
+
+    setPipQueue((prev) =>
+      prev.map((item) => (item.id === queueId ? { ...item, status: 'running' } : item))
+    );
+
+    let exitOk = true;
+    try {
+      exitOk = await streamExecReal(
+        {
+          comfyRoot: settings.comfyRoot,
+          pythonBinary: settings.pythonBinary,
+          pipPackages: requirements,
+        },
+        (line) => {
+          addLog({
+            timestamp: new Date().toLocaleTimeString(),
+            type: line.type,
+            text: line.text,
+          });
+        }
+      );
+    } catch (err) {
+      exitOk = false;
+      addLog({
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'stderr',
+        text: err instanceof Error ? err.message : 'pip execution failed',
+      });
+    }
+
+    setPipQueue((prev) =>
+      prev.map((item) =>
+        item.id === queueId ? { ...item, status: exitOk ? 'completed' : 'failed' } : item
+      )
+    );
   };
 
   // Registry Ingestion Handlers
-  const handleInstallFromRegistry = (regNode: RegistryNode) => {
-    const newNode: InstalledNode = {
-      id: `node-${Date.now()}`,
-      folderName: regNode.name,
-      cleanDisplayName: regNode.name.replace(/^ComfyUI[-_]/i, ''),
-      enabled: true,
-      gitUrl: regNode.gitUrl,
-      currentCommit: 'a1b2c3d',
-      branch: 'main',
-      hasUpdate: false,
-      filesCount: 45,
-      sizeMb: 12.5,
-      healthStatus: 'compliant',
-      healthIssues: [],
-      installedAt: new Date().toISOString().split('T')[0],
-      category: regNode.category,
-      author: regNode.author,
-      description: regNode.description,
-      providesNodes: regNode.nodeClasses,
-    };
-
-    updateNodes([...nodes, newNode]);
-
+  const handleInstallFromRegistry = async (regNode: RegistryNode) => {
     addLog({
       timestamp: new Date().toLocaleTimeString(),
       type: 'info',
       text: `git clone --depth 1 ${regNode.gitUrl} custom_nodes/${regNode.name}`,
     });
 
-    if (regNode.requirements && regNode.requirements.length > 0) {
-      handleEnqueuePip(regNode.name, regNode.requirements);
+    const res = await cloneNodeReal(settings.comfyRoot, regNode.gitUrl, 'main', regNode.name);
+    if (!res.success) {
+      addLog({
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'stderr',
+        text: `[Clone Error] ${res.error || 'Failed to clone repository'}`,
+      });
+      return;
+    }
+
+    addLog({
+      timestamp: new Date().toLocaleTimeString(),
+      type: 'success',
+      text: `[Cloned] ${regNode.name} installed into custom_nodes/.`,
+    });
+
+    await performFullScan(settings.comfyRoot, settings.pythonBinary);
+
+    const reqs = res.requirements && res.requirements.length > 0 ? res.requirements : regNode.requirements;
+    if (reqs && reqs.length > 0) {
+      handleEnqueuePip(regNode.name, reqs);
     }
   };
 
-  const handleInstallViaGitUrl = (url: string, branch?: string, folderName?: string) => {
+  const handleInstallViaGitUrl = async (url: string, branch?: string, folderName?: string) => {
     const computedFolder =
       folderName || url.split('/').pop()?.replace('.git', '') || 'ComfyUI-Custom';
-
-    const newNode: InstalledNode = {
-      id: `node-${Date.now()}`,
-      folderName: computedFolder,
-      cleanDisplayName: computedFolder.replace(/^ComfyUI[-_]/i, ''),
-      enabled: true,
-      gitUrl: url,
-      currentCommit: '8f9e0d1',
-      branch: branch || 'main',
-      hasUpdate: false,
-      filesCount: 30,
-      sizeMb: 8.4,
-      healthStatus: 'compliant',
-      healthIssues: [],
-      installedAt: new Date().toISOString().split('T')[0],
-      category: 'Custom',
-      author: url.split('/')[3] || 'community',
-      description: `Installed via direct Git URL: ${url}`,
-      providesNodes: [],
-    };
-
-    updateNodes([...nodes, newNode]);
 
     addLog({
       timestamp: new Date().toLocaleTimeString(),
@@ -437,127 +480,177 @@ export default function Home() {
       text: `git clone --depth 1 ${branch ? `-b ${branch} ` : ''}${url} custom_nodes/${computedFolder}`,
     });
 
-    handleEnqueuePip(computedFolder, ['requirements.txt']);
-  };
-
-  const handleBatchUrlImport = (urls: string[]) => {
-    addLog({
-      timestamp: new Date().toLocaleTimeString(),
-      type: 'info',
-      text: `[Batch URL Ingestion] Parsing ${urls.length} URLs with deduplication...`,
-    });
-
-    let addedCount = 0;
-    const newInstalledList = [...nodes];
-
-    for (const url of urls) {
-      const folder = url.split('/').pop()?.replace('.git', '') || 'ComfyUI-Node';
-      const exists = nodes.some((n) => n.gitUrl.toLowerCase() === url.toLowerCase());
-
-      if (!exists) {
-        addedCount++;
-        const newNode: InstalledNode = {
-          id: `node-${Date.now()}-${Math.random()}`,
-          folderName: folder,
-          cleanDisplayName: folder.replace(/^ComfyUI[-_]/i, ''),
-          enabled: true,
-          gitUrl: url,
-          currentCommit: 'commit001',
-          branch: 'main',
-          hasUpdate: false,
-          filesCount: 25,
-          sizeMb: 6.0,
-          healthStatus: 'compliant',
-          healthIssues: [],
-          installedAt: new Date().toISOString().split('T')[0],
-          category: 'Batch',
-          author: 'batch',
-          description: `Batch imported from nodes.txt`,
-          providesNodes: [],
-        };
-        newInstalledList.push(newNode);
-        handleEnqueuePip(folder, ['safetensors', 'numpy']);
-      }
+    const res = await cloneNodeReal(settings.comfyRoot, url, branch, computedFolder);
+    if (!res.success) {
+      addLog({
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'stderr',
+        text: `[Clone Error] ${res.error || 'Failed to clone repository'}`,
+      });
+      return;
     }
 
-    updateNodes(newInstalledList);
     addLog({
       timestamp: new Date().toLocaleTimeString(),
       type: 'success',
-      text: `[Batch URL Ingestion] Added ${addedCount} new custom node repositories.`,
+      text: `[Cloned] ${res.folderName || computedFolder} installed into custom_nodes/.`,
+    });
+
+    await performFullScan(settings.comfyRoot, settings.pythonBinary);
+
+    if (res.requirements && res.requirements.length > 0) {
+      handleEnqueuePip(res.folderName || computedFolder, res.requirements);
+    }
+  };
+
+  const handleBatchUrlImport = async (urls: string[]) => {
+    addLog({
+      timestamp: new Date().toLocaleTimeString(),
+      type: 'info',
+      text: `[Batch URL Ingestion] Cloning ${urls.length} URLs with deduplication...`,
+    });
+
+    let addedCount = 0;
+
+    for (const url of urls) {
+      const exists = nodes.some((n) => n.gitUrl.toLowerCase() === url.toLowerCase());
+      if (exists) continue;
+
+      const res = await cloneNodeReal(settings.comfyRoot, url);
+      if (res.success) {
+        addedCount++;
+        addLog({
+          timestamp: new Date().toLocaleTimeString(),
+          type: 'success',
+          text: `[Batch Cloned] ${res.folderName}`,
+        });
+        if (res.requirements && res.requirements.length > 0) {
+          handleEnqueuePip(res.folderName || url, res.requirements);
+        }
+      } else {
+        addLog({
+          timestamp: new Date().toLocaleTimeString(),
+          type: 'stderr',
+          text: `[Batch Error] ${url}: ${res.error || 'Clone failed'}`,
+        });
+      }
+    }
+
+    await performFullScan(settings.comfyRoot, settings.pythonBinary);
+    addLog({
+      timestamp: new Date().toLocaleTimeString(),
+      type: 'success',
+      text: `[Batch URL Ingestion] Cloned ${addedCount} new custom node repositories.`,
     });
   };
 
   // Updates
-  const handleCheckUpdates = () => {
+  const handleCheckUpdates = async () => {
     addLog({
       timestamp: new Date().toLocaleTimeString(),
       type: 'info',
       text: `Checking upstream git remotes with git ls-remote...`,
     });
-    setTimeout(() => {
+
+    const res = await checkUpdatesReal(settings.comfyRoot);
+    if (res.error || !res.updates) {
       addLog({
         timestamp: new Date().toLocaleTimeString(),
-        type: 'stdout',
-        text: `Checked ${nodes.length} repositories. 1 update available for comfyui_controlnet_aux_plus.`,
+        type: 'stderr',
+        text: `[Update Check Error] ${res.error || 'Failed to query git remotes'}`,
       });
-    }, 800);
+      return;
+    }
+
+    const updateMap = new Map(res.updates.map((u) => [u.folderName, u]));
+    const updatedNodes = nodes.map((n) => {
+      const info = updateMap.get(n.folderName);
+      if (!info) return n;
+      return {
+        ...n,
+        hasUpdate: info.hasUpdate,
+        latestCommit: info.latestCommit,
+      };
+    });
+    updateNodes(updatedNodes);
+
+    const available = res.updates.filter((u) => u.hasUpdate);
+    addLog({
+      timestamp: new Date().toLocaleTimeString(),
+      type: available.length > 0 ? 'warn' : 'success',
+      text: `Checked ${res.updates.length} git repositories. ${available.length} update(s) available${
+        available.length > 0 ? `: ${available.map((a) => a.folderName).join(', ')}` : '.'
+      }`,
+    });
   };
 
-  const handleUpdateAll = () => {
+  const handleUpdateAll = async () => {
+    const targets = nodes.filter((n) => n.hasUpdate);
+    if (targets.length === 0) {
+      addLog({
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'info',
+        text: `[Batch Update] No pending updates flagged. Run "Check Updates" first.`,
+      });
+      return;
+    }
+
     addLog({
       timestamp: new Date().toLocaleTimeString(),
       type: 'info',
-      text: `[Batch Update] Pulling latest commits and updating dependencies...`,
+      text: `[Batch Update] Pulling latest commits for ${targets.length} node(s)...`,
     });
 
     let newTxList = [...transactions];
-    const updated = nodes.map((n) => {
-      if (n.hasUpdate || n.folderName === 'comfyui_controlnet_aux_plus') {
+    for (const n of targets) {
+      const res = await updateNodeReal(settings.comfyRoot, n.folderName);
+      if (res.success) {
         newTxList = recordTransaction(newTxList, {
           nodeFolderName: n.folderName,
           nodeDisplayName: n.cleanDisplayName,
-          previousCommit: n.currentCommit,
-          targetCommit: n.latestCommit || 'a90e34c',
+          previousCommit: res.previousCommit || n.currentCommit,
+          targetCommit: res.newCommit || n.latestCommit || n.currentCommit,
+        });
+        addLog({
+          timestamp: new Date().toLocaleTimeString(),
+          type: 'success',
+          text: `[Updated] ${n.folderName}: ${res.previousCommit} -> ${res.newCommit}`,
+        });
+      } else {
+        addLog({
+          timestamp: new Date().toLocaleTimeString(),
+          type: 'stderr',
+          text: `[Update Error] ${n.folderName}: ${res.error || 'git pull failed'}`,
         });
       }
-      return { ...n, hasUpdate: false, currentCommit: n.latestCommit || 'a90e34c' };
-    });
+    }
 
     setTransactions(newTxList);
     StorageService.setTransactions(newTxList);
-    updateNodes(updated);
-    setTimeout(() => {
-      addLog({
-        timestamp: new Date().toLocaleTimeString(),
-        type: 'success',
-        text: `All ${nodes.length} custom nodes synchronized to latest upstream HEAD. Update ledger recorded for rollback.`,
-      });
-    }, 1000);
+    await performFullScan(settings.comfyRoot, settings.pythonBinary);
   };
 
-  const handleRollbackTransaction = (txId: string) => {
+  const handleRollbackTransaction = async (txId: string) => {
+    const tx = transactions.find((t) => t.id === txId);
+    if (!tx) return;
+
+    const res = await rollbackNodeReal(settings.comfyRoot, tx.nodeFolderName, tx.previousCommit);
+    if (!res.success) {
+      addLog({
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'stderr',
+        text: `[Git Rollback Error] ${res.error || 'git checkout failed'}`,
+      });
+      return;
+    }
+
     const { updatedTransactions, rolledBackTx } = rollbackTransaction(transactions, txId);
     if (!rolledBackTx) return;
 
     setTransactions(updatedTransactions);
     StorageService.setTransactions(updatedTransactions);
 
-    const targetFolder = rolledBackTx.nodeFolderName;
-    const targetCommit = rolledBackTx.previousCommit;
-
-    setNodes((prev) =>
-      prev.map((n) => {
-        if (n.folderName === targetFolder) {
-          return {
-            ...n,
-            currentCommit: targetCommit,
-            hasUpdate: true,
-          };
-        }
-        return n;
-      })
-    );
+    await performFullScan(settings.comfyRoot, settings.pythonBinary);
 
     addLog({
       timestamp: new Date().toLocaleTimeString(),
@@ -567,7 +660,7 @@ export default function Home() {
     addLog({
       timestamp: new Date().toLocaleTimeString(),
       type: 'success',
-      text: `[Git Rollback] Successfully rolled back ${rolledBackTx.nodeDisplayName} to commit ${targetCommit}.`,
+      text: `[Git Rollback] Successfully rolled back ${rolledBackTx.nodeDisplayName} to commit ${rolledBackTx.previousCommit}.`,
     });
   };
 
@@ -731,38 +824,27 @@ export default function Home() {
     addLog({
       timestamp: new Date().toLocaleTimeString(),
       type: 'info',
-      text: '[Sentinel] Scanning custom_nodes directory for updates and local changes...',
+      text: `[Sentinel] Scanning ${settings.comfyRoot}/custom_nodes on disk...`,
     });
-
-    if (isTauriEnvironment() && settings.comfyRoot) {
-      const customNodesPath = `${settings.comfyRoot}\\custom_nodes`;
-      const res = await nativeScanCustomNodes(customNodesPath);
-      if (res && res.length > 0) {
-        addLog({
-          timestamp: new Date().toLocaleTimeString(),
-          type: 'success',
-          text: `[Desktop Bridge] Discovered ${res.length} custom node directories from filesystem.`,
-        });
-      }
-    } else {
-      const refreshed = StorageService.getNodes();
-      setNodes(refreshed);
-      addLog({
-        timestamp: new Date().toLocaleTimeString(),
-        type: 'success',
-        text: `[Sentinel] Loaded ${refreshed.length} custom nodes from local inventory.`,
-      });
-    }
+    await performFullScan(settings.comfyRoot, settings.pythonBinary);
+    addLog({
+      timestamp: new Date().toLocaleTimeString(),
+      type: 'success',
+      text: `[Sentinel] Filesystem scan complete.`,
+    });
   };
 
-  const handleLaunchComfyUI = () => {
+  const handleLaunchComfyUI = async () => {
     const pythonCmd = settings.pythonBinary || 'python';
     const launchCommand = `${pythonCmd} main.py --listen 127.0.0.1 --port 8188`;
+
+    setTargetRunnerCommand(launchCommand);
+    setActiveTab('runner');
 
     addLog({
       timestamp: new Date().toLocaleTimeString(),
       type: 'info',
-      text: `[ComfyUI Daemon] Launching ComfyUI server...`,
+      text: `[ComfyUI Daemon] Starting ComfyUI in ${settings.comfyRoot}...`,
     });
     addLog({
       timestamp: new Date().toLocaleTimeString(),
@@ -770,8 +852,28 @@ export default function Home() {
       text: `$ ${launchCommand}`,
     });
 
-    setTargetRunnerCommand(launchCommand);
-    setActiveTab('runner');
+    try {
+      await streamExecReal(
+        {
+          command: launchCommand,
+          comfyRoot: settings.comfyRoot,
+          pythonBinary: settings.pythonBinary,
+        },
+        (line) => {
+          addLog({
+            timestamp: new Date().toLocaleTimeString(),
+            type: line.type,
+            text: line.text,
+          });
+        }
+      );
+    } catch (err) {
+      addLog({
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'stderr',
+        text: err instanceof Error ? err.message : 'Failed to launch ComfyUI',
+      });
+    }
   };
 
   if (!isClient) {
@@ -796,6 +898,28 @@ export default function Home() {
 
       {/* Main Content Viewport */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 pb-14">
+        {!settings.isValidRoot && !setupBannerDismissed && activeTab !== 'settings' && (
+          <div className="mb-6 rounded-xl border border-amber-700/60 bg-amber-950/30 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="text-xs text-amber-200">
+              <span className="font-semibold">ComfyUI directory not verified on disk:</span>{' '}
+              <code className="font-mono text-amber-100">{settings.comfyRoot || '(unset)'}</code>. Configure your ComfyUI root path in Settings to manage real custom nodes and models.
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => setActiveTab('settings')}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-slate-950 transition-colors"
+              >
+                Open Settings
+              </button>
+              <button
+                onClick={() => setSetupBannerDismissed(true)}
+                className="px-2.5 py-1.5 rounded-lg text-xs text-amber-300 hover:text-white transition-colors"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
         {activeTab === 'roadmap' && (
           <RoadmapView
             tasks={tasks}
@@ -837,6 +961,8 @@ export default function Home() {
             onEnqueuePip={handleEnqueuePip}
             onResolveShield={handleResolveShield}
             autoTorchShield={settings.autoTorchShield}
+            comfyRoot={settings.comfyRoot}
+            pythonBinary={settings.pythonBinary}
             initialCommand={targetRunnerCommand}
           />
         )}
@@ -864,6 +990,8 @@ export default function Home() {
         {activeTab === 'doctor' && (
           <HealthDoctorView
             installedNodes={nodes}
+            comfyRoot={settings.comfyRoot}
+            scannedRequirementsMap={scannedRequirementsMap}
             onPatchInstalledNode={handlePatchInstalledNode}
           />
         )}
@@ -881,6 +1009,8 @@ export default function Home() {
 
         {activeTab === 'models' && (
           <ModelsView
+            comfyRoot={settings.comfyRoot}
+            isValidRoot={settings.isValidRoot}
             onRunTerminalCommand={(cmd) => {
               addLog({
                 timestamp: new Date().toLocaleTimeString(),

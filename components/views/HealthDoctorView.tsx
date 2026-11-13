@@ -11,7 +11,6 @@ import {
   RotateCcw,
   Layers,
   ShieldAlert,
-  Flame,
   ArrowRight,
 } from 'lucide-react';
 import { InstalledNode, RegistryNode } from '@/types';
@@ -24,24 +23,31 @@ import {
   detectDependencyConflicts,
 } from '@/lib/conflict-detector';
 import { SAMPLE_PYTHON_CODE_WITH_ISSUES, COMMUNITY_REGISTRY } from '@/lib/default-data';
+import { readNodeFileReal, patchNodeFileReal } from '@/lib/system-client';
 
 interface HealthDoctorViewProps {
   installedNodes: InstalledNode[];
+  comfyRoot: string;
+  scannedRequirementsMap?: Record<string, string[]>;
   onPatchInstalledNode?: (nodeId: string) => void;
 }
 
 export function HealthDoctorView({
   installedNodes,
+  comfyRoot,
+  scannedRequirementsMap,
   onPatchInstalledNode,
 }: HealthDoctorViewProps) {
   const [activeSubTab, setActiveSubTab] = useState<'linter' | 'conflict_matrix'>('linter');
   const [selectedNodeId, setSelectedNodeId] = useState<string>('sample-sandbox');
+  const [activeRelativeFile, setActiveRelativeFile] = useState<string>('__init__.py');
+  const [fileLoadError, setFileLoadError] = useState<string | null>(null);
+  const [isLoadingFile, setIsLoadingFile] = useState<boolean>(false);
   const [customPythonCode, setCustomPythonCode] = useState(
     SAMPLE_PYTHON_CODE_WITH_ISSUES
   );
   const [patchedToast, setPatchedToast] = useState(false);
   const [severityFilter, setSeverityFilter] = useState<'all' | 'critical' | 'warning'>('all');
-  const [simulateConflict, setSimulateConflict] = useState<boolean>(false);
 
   // Analyze active code
   const lintResult: LintAnalysisResult = lintPythonNodeCode(
@@ -49,29 +55,24 @@ export function HealthDoctorView({
     selectedNodeId === 'sample-sandbox' ? 'node_entry.py' : `${selectedNodeId}.py`
   );
 
-  // Requirements map constructed from installed nodes and community defaults
+  // Requirements map constructed from real scanned requirements.txt files (or registry fallback)
   const requirementsMap = useMemo(() => {
     const map: Record<string, string[]> = {};
     for (const node of installedNodes) {
-      const reg = COMMUNITY_REGISTRY.find(
-        (r: RegistryNode) => r.name.toLowerCase() === node.folderName.toLowerCase() || r.id === node.id
-      );
-      if (reg && reg.requirements && reg.requirements.length > 0) {
-        map[node.folderName] = reg.requirements;
+      const scanned = scannedRequirementsMap?.[node.folderName];
+      if (scanned && scanned.length > 0) {
+        map[node.folderName] = scanned;
       } else {
-        // Fallback default requirements based on common custom node needs
-        map[node.folderName] = ['einops', 'scipy', 'numpy>=1.24.0'];
+        const reg = COMMUNITY_REGISTRY.find(
+          (r: RegistryNode) => r.name.toLowerCase() === node.folderName.toLowerCase() || r.id === node.id
+        );
+        if (reg && reg.requirements && reg.requirements.length > 0) {
+          map[node.folderName] = reg.requirements;
+        }
       }
     }
-
-    // Optional simulated conflict for interactive demonstration
-    if (simulateConflict) {
-      map['ComfyUI-VideoHelperSuite'] = ['opencv-python>=4.8.0', 'numpy<2.0.0'];
-      map['ComfyUI-Reactor-FaceSwap'] = ['opencv-python-headless>=4.8.0', 'onnxruntime', 'numpy>=2.0.0'];
-    }
-
     return map;
-  }, [installedNodes, simulateConflict]);
+  }, [installedNodes, scannedRequirementsMap]);
 
   // Run conflict detection
   const detectedConflicts = useMemo(() => {
@@ -86,30 +87,52 @@ export function HealthDoctorView({
   const criticalCount = detectedConflicts.filter((c) => c.severity === 'critical').length;
   const warningCount = detectedConflicts.filter((c) => c.severity === 'warning').length;
 
-  const handleSelectNode = (nodeId: string) => {
+  const handleSelectNode = async (nodeId: string) => {
     setSelectedNodeId(nodeId);
+    setFileLoadError(null);
     if (nodeId === 'sample-sandbox') {
+      setActiveRelativeFile('node_entry.py');
       setCustomPythonCode(SAMPLE_PYTHON_CODE_WITH_ISSUES);
-    } else {
-      const node = installedNodes.find((n) => n.id === nodeId);
-      if (node && node.healthIssues.length > 0) {
-        const issueLines = node.healthIssues
-          .map((iss) => `# Line ${iss.line}: ${iss.title}\n${iss.snippet}`)
-          .join('\n\n');
-        setCustomPythonCode(
-          `# Inspection of ${node.folderName}\nimport os\n\n${issueLines}\n\n# Node class definitions...\nclass Node:\n    pass\n`
-        );
+      return;
+    }
+
+    const node = installedNodes.find((n) => n.id === nodeId);
+    if (!node) return;
+
+    const targetFile = node.healthIssues[0]?.file || '__init__.py';
+    setActiveRelativeFile(targetFile);
+    setIsLoadingFile(true);
+    try {
+      const res = await readNodeFileReal(comfyRoot, node.folderName, targetFile);
+      if (res.success && typeof res.content === 'string') {
+        setCustomPythonCode(res.content);
       } else {
-        setCustomPythonCode(
-          `# ${node?.folderName || 'Clean Node'}\nimport os\nfrom .utils import helper\n\nclass CleanNode:\n    CATEGORY = "Clean"\n    # All paths and imports compliant\n`
-        );
+        setFileLoadError(res.error || `Could not read ${targetFile}`);
+        setCustomPythonCode(`# Unable to load ${node.folderName}/${targetFile}\n# ${res.error || 'File not found'}`);
       }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to read file';
+      setFileLoadError(msg);
+    } finally {
+      setIsLoadingFile(false);
     }
   };
 
-  const handleAutoPatch = () => {
+  const handleAutoPatch = async () => {
     const { patchedCode } = autoPatchPythonCode(customPythonCode);
     setCustomPythonCode(patchedCode);
+
+    if (selectedNodeId !== 'sample-sandbox') {
+      const node = installedNodes.find((n) => n.id === selectedNodeId);
+      if (node) {
+        const res = await patchNodeFileReal(comfyRoot, node.folderName, activeRelativeFile, patchedCode);
+        if (!res.success) {
+          setFileLoadError(res.error || 'Failed to write patched file to disk');
+          return;
+        }
+      }
+    }
+
     setPatchedToast(true);
     setTimeout(() => setPatchedToast(false), 2500);
 
@@ -142,30 +165,18 @@ export function HealthDoctorView({
           </div>
 
           <div className="flex items-center gap-3">
-            {activeSubTab === 'linter' ? (
+            {activeSubTab === 'linter' && (
               <button
                 onClick={handleAutoPatch}
-                disabled={lintResult.fixCount === 0}
+                disabled={lintResult.fixCount === 0 || isLoadingFile}
                 className={`flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg shadow-sm transition-colors ${
-                  lintResult.fixCount > 0
+                  lintResult.fixCount > 0 && !isLoadingFile
                     ? 'bg-indigo-600 hover:bg-indigo-500 text-white'
                     : 'bg-slate-800 text-slate-500 cursor-not-allowed'
                 }`}
               >
                 <Wand2 className="w-3.5 h-3.5" />
                 <span>Auto-Patch Code ({lintResult.fixCount} Fixes)</span>
-              </button>
-            ) : (
-              <button
-                onClick={() => setSimulateConflict(!simulateConflict)}
-                className={`flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg shadow-sm transition-colors ${
-                  simulateConflict
-                    ? 'bg-rose-950/80 border border-rose-800 text-rose-300 hover:bg-rose-900'
-                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
-                }`}
-              >
-                <Flame className="w-3.5 h-3.5" />
-                <span>{simulateConflict ? 'Simulated Conflicts Active' : 'Inject Demo Conflict'}</span>
               </button>
             )}
           </div>
@@ -264,6 +275,9 @@ export function HealthDoctorView({
                     </option>
                   ))}
                 </select>
+                {fileLoadError && (
+                  <p className="mt-2 text-[11px] text-rose-400 font-mono">{fileLoadError}</p>
+                )}
               </div>
 
               {/* Issue Breakdown */}
