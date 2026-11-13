@@ -29,7 +29,7 @@ export function exportToGitHubCliScript(tasks: RoadmapTask[]): string {
   ];
 
   for (const task of tasks) {
-    const labelsArg = task.githubLabels.length > 0 ? `--label "${task.githubLabels.join(',')}"` : '';
+    const labelsArg = (task.githubLabels ?? []).length > 0 ? `--label "${(task.githubLabels ?? []).join(',')}"` : '';
     const escapedTitle = task.title.replace(/"/g, '\\"');
     const bodyContent = `### ${task.phaseTitle}\\n\\n${task.description}\\n\\n**Technical Implementation:**\\n${task.technicalDetails || 'Standard implementation'}\\n\\n**Priority:** ${task.linearPriority}\\n\\n- [ ] Acceptance Criteria Verified`;
     const escapedBody = bodyContent.replace(/"/g, '\\"');
@@ -61,7 +61,7 @@ export function exportToLinearCsv(tasks: RoadmapTask[]): string {
     ).replace(/"/g, '""')}"`;
     const status = task.completed ? '"Done"' : '"Todo"';
     const priority = `"${task.linearPriority}"`;
-    const labels = `"${task.githubLabels.join(', ')}"`;
+    const labels = `"${(task.githubLabels ?? []).join(', ')}"`;
 
     rows.push([title, description, status, priority, labels].join(','));
   }
@@ -92,7 +92,7 @@ export function exportToNotionMarkdown(tasks: RoadmapTask[]): string {
       if (t.technicalDetails) {
         lines.push(`  - Tech Architecture: \`${t.technicalDetails}\``);
       }
-      lines.push(`  - Priority: \`${t.linearPriority}\` | Labels: ${t.githubLabels.map((l) => `\`${l}\``).join(' ')}`);
+      lines.push(`  - Priority: \`${t.linearPriority}\` | Labels: ${(t.githubLabels ?? []).map((l) => `\`${l}\``).join(' ')}`);
     }
 
     lines.push('');

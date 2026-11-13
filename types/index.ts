@@ -239,12 +239,14 @@ export type PhaseId =
 
 export interface RoadmapTask {
   id: string;
-  phase: PhaseId;
+  phase?: PhaseId;
+  /** Legacy alias of `phase` used by the roadmap UI and exporters. */
+  phaseId?: PhaseId;
   phaseTitle?: string;
   title: string;
   description: string;
-  status: 'todo' | 'in_progress' | 'done' | (string & {});
-  priority: 'critical' | 'high' | 'medium' | 'low' | (string & {});
+  status?: 'todo' | 'in_progress' | 'done' | (string & {});
+  priority?: 'critical' | 'high' | 'medium' | 'low' | (string & {});
   category?: string;
   completed?: boolean;
   tags?: string[];
@@ -253,6 +255,9 @@ export interface RoadmapTask {
   subtasks?: string[];
   acceptanceCriteria?: string[];
   estimatedEffort?: string;
+  technicalDetails?: string;
+  githubLabels?: string[];
+  linearPriority?: 'Urgent' | 'High' | 'Medium' | 'Low';
 }
 
 export interface ComfyDeviceStats {

@@ -63,7 +63,7 @@ export function RoadmapView({
       const q = searchQuery.toLowerCase();
       const matchTitle = task.title.toLowerCase().includes(q);
       const matchDesc = task.description.toLowerCase().includes(q);
-      const matchLabels = task.githubLabels.some((l) => l.toLowerCase().includes(q));
+      const matchLabels = (task.githubLabels ?? []).some((l) => l.toLowerCase().includes(q));
       if (!matchTitle && !matchDesc && !matchLabels) return false;
     }
     return true;
@@ -270,7 +270,7 @@ export function RoadmapView({
                         </span>
 
                         <span className="text-xs text-slate-500">
-                          {task.phaseTitle.split(':')[0]}
+                          {(task.phaseTitle ?? '').split(':')[0]}
                         </span>
                         <span aria-hidden="true" className="text-slate-700">·</span>
                         <span className="text-xs text-slate-500 font-mono">
@@ -284,7 +284,7 @@ export function RoadmapView({
 
                       {/* Labels */}
                       <div className="flex flex-wrap items-center gap-2 mt-2 text-xs text-slate-500">
-                        {task.githubLabels.map((lbl) => (
+                        {(task.githubLabels ?? []).map((lbl) => (
                           <span key={lbl} className="font-mono text-[11px] text-slate-400">
                             #{lbl}
                           </span>
