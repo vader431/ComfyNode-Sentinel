@@ -154,6 +154,9 @@ npm run lint
 # Build production standalone bundle
 npm run build
 
-# Run Tauri desktop app (requires Rust toolchain)
-npx tauri dev
+# Run Tauri desktop app in dev mode (requires Rust toolchain)
+npm run tauri:dev
+
+# Build standalone Tauri desktop installers (.msi / -setup.exe)
+npm run tauri:build
 ```

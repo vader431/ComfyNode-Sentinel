@@ -5,6 +5,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [0.2.0] - 2026-11-13
+
+### Added
+- **Desktop App Shell & Official Branding**:
+  - Redesigned UI into a desktop app shell with a `48px` top utility bar (`Header`), `220px` grouped navigation rail (`Sidebar`), first-run onboarding card, collapsible Inspector storage charts, non-blocking toast notifications, and a quick-peek Console drawer.
+  - Added the official **Sentinel Node Shield** app icon across web (`app/icon.svg`, `public/logo.svg`, `components/SentinelLogo.tsx`) and Tauri desktop (`src-tauri/icons/`).
+  - Added version badges (`v0.2.0`) in the header and sidebar sourced from `package.json`.
+- **Standalone Tauri v2 Desktop Packaging**:
+  - Added `npm run tauri:dev` and `npm run tauri:build` scripts, `scripts/prepare-desktop.mjs`, and `src-tauri/loading/index.html` to bundle Next.js standalone output into `.msi` and `-setup.exe` Windows installers.
+- **Dedicated Updates & Rollback View**:
+  - Added a dedicated Updates & Rollback sub-tab with per-node status, single-node/batch `git pull`, `Last Updated` column, and a live progress bar during repository checks and updates.
+
+### Changed & Improved
+- **Real Backend APIs & Performance**:
+  - Replaced mock data with real `/api/environment`, `/api/nodes/scan`, `/api/nodes/action`, `/api/models/scan`, `/api/models/deduplicate`, and `/api/exec` routes.
+  - Parallelized git update checks, capped terminal log storage, memoized the Health Doctor linter, and removed the duplicate Updates sub-tab inside Install & Browse.
+- **Status Bar Cleanup**:
+  - Removed the active `Profile:` indicator from the bottom status bar (`components/StatusBar.tsx`).
+
+### Security
+- Resolved all 11 `npm audit` vulnerabilities (10 moderate, 1 high) via `postcss` update and `package.json` `overrides` (`minimatch`, `postcss`, `postcss-selector-parser`) with 0 remaining vulnerabilities.
+
+---
+
 ## [1.2.0] - 2026-11-12
 
 ### Added
