@@ -16,6 +16,7 @@ import { ProfilesView } from '@/components/views/ProfilesView';
 import { ModelsView } from '@/components/views/ModelsView';
 import { SettingsView } from '@/components/views/SettingsView';
 import { StorageService } from '@/lib/storage';
+import { COMMUNITY_REGISTRY } from '@/lib/default-data';
 import {
   recordTransaction,
   rollbackTransaction,
@@ -85,8 +86,8 @@ export default function Home() {
       ...entry,
     };
     setLogs((prev) => {
-      const updated = [...prev, newEntry];
-      StorageService.setLogs(updated);
+      const updated = [...prev, newEntry].slice(-300);
+      StorageService.setLogs(updated.slice(-100));
       return updated;
     });
   };
@@ -740,87 +741,91 @@ export default function Home() {
   };
 
   // Lockfile Reconciliation Handler
-  const handleApplyReconciliation = (items: ReconciliationItem[]) => {
-    let updatedNodes = [...nodes];
+  const handleApplyReconciliation = async (items: ReconciliationItem[]) => {
+    if (!settings.isValidRoot) {
+      pushToast('warn', 'ComfyUI not configured', 'Set a valid ComfyUI path in Settings first.');
+      return;
+    }
 
     for (const item of items) {
       if (item.action === 'clone') {
-        const newNode: InstalledNode = {
-          id: `node-${Date.now()}-${Math.random()}`,
-          folderName: item.name,
-          cleanDisplayName: item.name.replace(/^ComfyUI[-_]/i, ''),
-          enabled: item.targetEnabled ?? true,
-          gitUrl: item.gitUrl,
-          currentCommit: item.targetCommit || 'pinned',
-          branch: 'main',
-          hasUpdate: false,
-          filesCount: 30,
-          sizeMb: 10.0,
-          healthStatus: 'compliant',
-          healthIssues: [],
-          installedAt: new Date().toISOString().split('T')[0],
-          category: 'Sync',
-          author: 'sync',
-          description: 'Synchronized via comfy-lock.json',
-          providesNodes: [],
-        };
-        updatedNodes.push(newNode);
+        const res = await cloneNodeReal(settings.comfyRoot, item.gitUrl, undefined, item.name);
+        if (!res.success) {
+          addLog({
+            timestamp: new Date().toLocaleTimeString(),
+            type: 'stderr',
+            text: `[Sync Clone Error] ${item.name}: ${res.error || 'Clone failed'}`,
+          });
+          continue;
+        }
+        if (item.targetCommit && item.targetCommit !== 'pinned') {
+          await rollbackNodeReal(settings.comfyRoot, item.name, item.targetCommit);
+        }
+        if (item.targetEnabled === false) {
+          await toggleNodeStateReal(settings.comfyRoot, item.name);
+        }
         addLog({
           timestamp: new Date().toLocaleTimeString(),
-          type: 'info',
-          text: `[Sync Clone] git clone ${item.gitUrl} && git checkout ${item.targetCommit?.slice(0, 7)}`,
+          type: 'success',
+          text: `[Sync Clone] Cloned ${item.name} from ${item.gitUrl}`,
         });
-      } else if (item.action === 'checkout') {
-        updatedNodes = updatedNodes.map((n) =>
-          n.folderName === item.name
-            ? { ...n, currentCommit: item.targetCommit || n.currentCommit }
-            : n
-        );
+      } else if (item.action === 'checkout' && item.targetCommit) {
+        const res = await rollbackNodeReal(settings.comfyRoot, item.name, item.targetCommit);
         addLog({
           timestamp: new Date().toLocaleTimeString(),
-          type: 'info',
-          text: `[Sync Checkout] git -C custom_nodes/${item.name} checkout ${item.targetCommit?.slice(0, 7)}`,
+          type: res.success ? 'info' : 'stderr',
+          text: res.success
+            ? `[Sync Checkout] ${item.name} -> ${item.targetCommit.slice(0, 7)}`
+            : `[Sync Checkout Error] ${item.name}: ${res.error || 'Checkout failed'}`,
         });
       } else if (item.action === 'toggle_state') {
-        updatedNodes = updatedNodes.map((n) =>
-          n.folderName === item.name ? { ...n, enabled: item.targetEnabled ?? n.enabled } : n
-        );
+        const res = await toggleNodeStateReal(settings.comfyRoot, item.name);
         addLog({
           timestamp: new Date().toLocaleTimeString(),
-          type: 'info',
-          text: `[Sync State] Toggled state for ${item.name} to ${item.targetEnabled ? 'enabled' : 'disabled'}.`,
+          type: res.success ? 'info' : 'stderr',
+          text: res.success
+            ? `[Sync State] Toggled ${item.name} -> ${item.targetEnabled ? 'enabled' : 'disabled'}`
+            : `[Sync State Error] ${item.name}: ${res.error || 'Toggle failed'}`,
         });
       }
     }
 
-    updateNodes(updatedNodes);
+    await performFullScan(settings.comfyRoot, settings.pythonBinary);
     addLog({
       timestamp: new Date().toLocaleTimeString(),
       type: 'success',
-      text: `Reconciliation plan executed successfully. Environment matches lockfile specification.`,
+      text: `Reconciliation plan executed against disk.`,
     });
+    pushToast('success', 'Lockfile reconciled', `Applied ${items.length} action(s) on disk.`);
   };
 
   // Workspace Profile Handler
-  const handleSwitchProfile = (profileId: string) => {
+  const handleSwitchProfile = async (profileId: string) => {
     const profile = profiles.find((p) => p.id === profileId);
     if (!profile) return;
 
     updateActiveProfile(profileId);
+    if (!settings.isValidRoot) {
+      pushToast('warn', 'Profile selected', 'Connect your ComfyUI directory in Settings to apply folder toggles on disk.');
+      return;
+    }
 
-    // Reconcile enabled nodes with profile targetNodeFolders in sub-2-second speed
-    const updated = nodes.map((n) => ({
-      ...n,
-      enabled: profile.targetNodeFolders.includes(n.folderName),
-    }));
+    let toggledCount = 0;
+    for (const n of nodes) {
+      const shouldEnable = profile.targetNodeFolders.includes(n.folderName);
+      if (n.enabled !== shouldEnable) {
+        const res = await toggleNodeStateReal(settings.comfyRoot, n.folderName);
+        if (res.success) toggledCount++;
+      }
+    }
 
-    updateNodes(updated);
-
+    await performFullScan(settings.comfyRoot, settings.pythonBinary);
     addLog({
       timestamp: new Date().toLocaleTimeString(),
       type: 'success',
-      text: `[Profile Switcher] Activated profile "${profile.name}" in 34ms. Enabled ${profile.targetNodeFolders.length} nodes, disabled remaining.`,
+      text: `[Profile Switcher] Activated "${profile.name}" (${toggledCount} folder(s) toggled on disk).`,
     });
+    pushToast('success', `Profile: ${profile.name}`, `Toggled ${toggledCount} node folder(s) on disk.`);
   };
 
   const handleCreateProfile = (name: string, description: string) => {
@@ -845,19 +850,42 @@ export default function Home() {
   };
 
   // Workflow Pre-Flight Missing Nodes Installer
-  const handleInstallMissingNodes = (missingClassNames: string[]) => {
+  const handleInstallMissingNodes = async (missingClassNames: string[]) => {
+    if (!settings.isValidRoot) {
+      pushToast('warn', 'ComfyUI not configured', 'Set a valid ComfyUI path in Settings first.');
+      return;
+    }
+
     addLog({
       timestamp: new Date().toLocaleTimeString(),
       type: 'info',
-      text: `[Workflow Pre-Flight] Enqueuing installation for missing classes: ${missingClassNames.join(', ')}`,
+      text: `[Workflow Pre-Flight] Resolving missing classes: ${missingClassNames.join(', ')}`,
     });
 
+    const matchedRepos = new Map<string, RegistryNode>();
+    const unresolved: string[] = [];
+
     for (const className of missingClassNames) {
-      handleInstallViaGitUrl(
-        `https://github.com/comfyui-community/ComfyUI-${className}.git`,
-        'main',
-        `ComfyUI-${className}`
+      const match = COMMUNITY_REGISTRY.find((r) =>
+        r.nodeClasses.some((c) => c.toLowerCase() === className.toLowerCase())
       );
+      if (match) {
+        matchedRepos.set(match.id, match);
+      } else {
+        unresolved.push(className);
+      }
+    }
+
+    for (const repo of matchedRepos.values()) {
+      await handleInstallFromRegistry(repo);
+    }
+
+    if (unresolved.length > 0) {
+      addLog({
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'warn',
+        text: `[Workflow Pre-Flight] No registry match for: ${unresolved.join(', ')}. Use "Install via URL" in Install & Browse.`,
+      });
     }
   };
 

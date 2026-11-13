@@ -142,41 +142,51 @@ export async function POST(req: NextRequest) {
 
       case 'check_updates': {
         if (!fs.existsSync(customNodesDir)) {
-          return NextResponse.json({ updates: [] });
+          return NextResponse.json({ success: true, updates: [] });
         }
-        const entries = fs.readdirSync(customNodesDir, { withFileTypes: true });
+        const entries = fs
+          .readdirSync(customNodesDir, { withFileTypes: true })
+          .filter((e) => e.isDirectory() && fs.existsSync(path.join(customNodesDir, e.name, '.git')));
+
         const updates: { folderName: string; hasUpdate: boolean; behindCount: number; latestCommit?: string }[] = [];
+        const concurrency = 6;
 
-        for (const entry of entries) {
-          if (!entry.isDirectory()) continue;
-          const nodePath = path.join(customNodesDir, entry.name);
-          if (!fs.existsSync(path.join(nodePath, '.git'))) continue;
-
-          try {
-            await execFileAsync('git', ['-C', nodePath, 'fetch', '--quiet'], { timeout: 15000 });
-            const { stdout: countOut } = await execFileAsync(
-              'git',
-              ['-C', nodePath, 'rev-list', 'HEAD..@{u}', '--count'],
-              { timeout: 5000 }
-            );
-            const behindCount = parseInt(countOut.trim(), 10) || 0;
-            let latestCommit: string | undefined;
-            if (behindCount > 0) {
-              const { stdout: shaOut } = await execFileAsync(
-                'git',
-                ['-C', nodePath, 'rev-parse', '--short', '@{u}'],
-                { timeout: 5000 }
-              );
-              latestCommit = shaOut.trim();
-            }
-            updates.push({
-              folderName: entry.name,
-              hasUpdate: behindCount > 0,
-              behindCount,
-              latestCommit,
-            });
-          } catch {
-            // Skip repos without upstream tracking branch
+        for (let i = 0; i < entries.length; i += concurrency) {
+          const batch = entries.slice(i, i + concurrency);
+          const batchResults = await Promise.all(
+            batch.map(async (entry) => {
+              const nodePath = path.join(customNodesDir, entry.name);
+              try {
+                await execFileAsync('git', ['-C', nodePath, 'fetch', '--quiet'], { timeout: 15000 });
+                const { stdout: countOut } = await execFileAsync(
+                  'git',
+                  ['-C', nodePath, 'rev-list', 'HEAD..@{u}', '--count'],
+                  { timeout: 5000 }
+                );
+                const behindCount = parseInt(countOut.trim(), 10) || 0;
+                let latestCommit: string | undefined;
+                if (behindCount > 0) {
+                  const { stdout: shaOut } = await execFileAsync(
+                    'git',
+                    ['-C', nodePath, 'rev-parse', '--short', '@{u}'],
+                    { timeout: 5000 }
+                  );
+                  latestCommit = shaOut.trim();
+                }
+                return {
+                  folderName: entry.name,
+                  hasUpdate: behindCount > 0,
+                  behindCount,
+                  latestCommit,
+                };
+              } catch {
+                // Skip repos without upstream tracking branch
+                return null;
+              }
+            })
+          );
+          for (const r of batchResults) {
+            if (r) updates.push(r);
           }
         }
 

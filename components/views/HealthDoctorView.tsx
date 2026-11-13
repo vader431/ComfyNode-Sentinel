@@ -49,10 +49,14 @@ export function HealthDoctorView({
   const [patchedToast, setPatchedToast] = useState(false);
   const [severityFilter, setSeverityFilter] = useState<'all' | 'critical' | 'warning'>('all');
 
-  // Analyze active code
-  const lintResult: LintAnalysisResult = lintPythonNodeCode(
-    customPythonCode,
-    selectedNodeId === 'sample-sandbox' ? 'node_entry.py' : `${selectedNodeId}.py`
+  // Analyze active code (memoized so typing/filtering doesn't re-lint unnecessarily)
+  const lintResult: LintAnalysisResult = useMemo(
+    () =>
+      lintPythonNodeCode(
+        customPythonCode,
+        selectedNodeId === 'sample-sandbox' ? 'node_entry.py' : activeRelativeFile || `${selectedNodeId}.py`
+      ),
+    [customPythonCode, selectedNodeId, activeRelativeFile]
   );
 
   // Requirements map constructed from real scanned requirements.txt files (or registry fallback)
