@@ -5,6 +5,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [0.3.0] - 2026-11-13
+
+### Added
+- **Native Folder & Binary Picker (`tauri-plugin-dialog`)**:
+  - Added **Browse…** buttons in `OnboardingCard` and `SettingsView` to select the ComfyUI root directory and Python executable via native OS dialogs in desktop mode.
+- **Managed ComfyUI Process Lifecycle (`/api/comfy/process`)**:
+  - Added detached background ComfyUI process management with PID tracking, port `8188` TCP readiness detection, **Stop** / **Restart** / **Open UI** controls in `Header`, and live stdout/stderr log tailing.
+- **Python `pip` Snapshot & Drift Diff (`/api/env/pip-snapshot`)**:
+  - Added **Pip Snapshot & Drift** sub-tab in `HealthDoctorView` to capture baseline `pip list --format=json` snapshots and highlight added, removed, and changed packages (with critical ML package badges).
+- **Live ComfyUI-Manager Registry Sync (`/api/registry/sync`)**:
+  - Added **Sync Registry** in `RegistryView` to fetch and cache upstream `custom-node-list.json` and `extension-node-map.json` with offline fallback.
+- **Bundled Node.js Sidecar (`externalBin`) & Linux CI Packaging**:
+  - Updated `scripts/prepare-desktop.mjs`, `src-tauri/tauri.conf.json`, and `src-tauri/src/lib.rs` to bundle the Node.js runtime sidecar directly inside desktop installers, making `.deb`, `.rpm`, `.AppImage`, and Windows installers self-contained.
+  - Added GitHub Actions (`.github/workflows/release.yml`) and GitLab CI/CD (`.gitlab-ci.yml`) pipelines for Linux and Windows release artifacts.
+  - Added `~` / `~/...` home directory expansion (`expandHomeDir`) and `~/ComfyUI` quick-path preset for Linux/macOS onboarding.
+- **API Route Integration Tests**:
+  - Added `tests/api-routes.test.ts` and `tests/pip-snapshot.test.ts` verifying environment validation, node scanning/actions, model duplicate hashing, and `pip` drift diffing.
+
+---
+
 ## [0.2.0] - 2026-11-13
 
 ### Added
