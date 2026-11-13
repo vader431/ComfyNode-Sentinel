@@ -329,17 +329,17 @@ export function ModelsView({ comfyRoot, isValidRoot, onRunTerminalCommand }: Mod
 
               {/* Category Filter Pills */}
               <div className="flex items-center gap-1.5 overflow-x-auto">
-                {(['all', 'checkpoints', 'loras', 'controlnet', 'vae'] as const).map((cat) => (
+                {(['all', 'checkpoints', 'loras', 'controlnet', 'vae', 'upscale_models'] as const).map((cat) => (
                   <button
                     key={cat}
                     onClick={() => setSelectedCategory(cat)}
-                    className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors uppercase tracking-wider ${
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors uppercase tracking-wider shrink-0 ${
                       selectedCategory === cat
                         ? 'bg-slate-800 text-indigo-400 border border-indigo-500/30'
                         : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    {cat}
+                    {cat === 'upscale_models' ? 'upscalers' : cat}
                   </button>
                 ))}
               </div>
@@ -442,7 +442,7 @@ export function ModelsView({ comfyRoot, isValidRoot, onRunTerminalCommand }: Mod
                 <label className="text-xs font-semibold text-slate-300 block mb-2">
                   Precision / Quantization Level
                 </label>
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   {[
                     { id: 'fp16', label: 'FP16 / BF16', sub: 'Native Uncompressed' },
                     { id: 'fp8', label: 'FP8 (e4m3fn)', sub: 'Fast 50% Reduction' },

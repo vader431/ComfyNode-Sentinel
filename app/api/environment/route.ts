@@ -1,5 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { validateComfyEnvironment } from '@/lib/server-fs';
+import {
+  detectHostComfyCandidates,
+  validateComfyEnvironment,
+} from '@/lib/server-fs';
+
+export async function GET() {
+  try {
+    return NextResponse.json(detectHostComfyCandidates());
+  } catch (err) {
+    return NextResponse.json(
+      {
+        platform: process.platform,
+        arch: process.arch,
+        presetPaths: [],
+        detectedPaths: [],
+        error: err instanceof Error ? err.message : 'Failed to inspect host environment',
+      },
+      { status: 500 }
+    );
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -15,10 +35,11 @@ export async function POST(req: NextRequest) {
         isValidRoot: false,
         hasMainPy: false,
         hasCustomNodes: false,
+        platform: process.platform,
+        arch: process.arch,
         error: err instanceof Error ? err.message : 'Failed to check environment',
       },
       { status: 500 }
     );
   }
 }
-

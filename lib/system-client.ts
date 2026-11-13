@@ -10,10 +10,26 @@ export interface EnvironmentCheckResponse {
   isValidRoot: boolean;
   hasMainPy: boolean;
   hasCustomNodes: boolean;
+  resolvedRoot?: string;
   detectedPython: string;
   pythonVersion: string;
   pythonType?: 'windows_portable' | 'virtualenv' | 'system' | 'custom';
+  platform?: string;
+  arch?: string;
   error?: string;
+}
+
+export interface HostEnvironmentDetectionResponse {
+  platform: string;
+  arch: string;
+  presetPaths: string[];
+  detectedPaths: string[];
+  error?: string;
+}
+
+export async function detectHostEnvironmentReal(): Promise<HostEnvironmentDetectionResponse> {
+  const res = await fetch('/api/environment', { method: 'GET' });
+  return res.json();
 }
 
 export async function checkEnvironmentReal(
@@ -190,6 +206,18 @@ export async function rollbackNodeReal(
   return res.json();
 }
 
+export async function listNodeFilesReal(
+  comfyRoot: string,
+  folderName: string
+): Promise<{ success?: boolean; files?: string[]; error?: string }> {
+  const res = await fetch('/api/nodes/action', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'list_files', comfyRoot, folderName }),
+  });
+  return res.json();
+}
+
 export async function readNodeFileReal(
   comfyRoot: string,
   folderName: string,
@@ -199,6 +227,39 @@ export async function readNodeFileReal(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: 'read_file', comfyRoot, folderName, relativeFile }),
+  });
+  return res.json();
+}
+
+export async function readNodeReadmeReal(
+  comfyRoot: string,
+  folderName: string
+): Promise<{ success?: boolean; fileName?: string; content?: string; error?: string }> {
+  const res = await fetch('/api/nodes/action', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'read_readme', comfyRoot, folderName }),
+  });
+  return res.json();
+}
+
+export async function reinstallNodeReal(
+  comfyRoot: string,
+  folderName: string,
+  gitUrl?: string
+): Promise<{
+  success?: boolean;
+  folderName?: string;
+  currentCommit?: string;
+  branch?: string;
+  requirements?: string[];
+  output?: string;
+  error?: string;
+}> {
+  const res = await fetch('/api/nodes/action', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'reinstall', comfyRoot, folderName, gitUrl }),
   });
   return res.json();
 }

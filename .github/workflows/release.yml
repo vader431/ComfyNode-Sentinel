@@ -6,11 +6,53 @@ on:
       - 'v*'
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
 jobs:
+  verify:
+    name: Pre-Release Verification Gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f bun.lock ]; then
+            npx --yes bun install --frozen-lockfile
+          else
+            npm install --no-audit
+          fi
+
+      - name: TypeScript typecheck
+        run: npx tsc --noEmit
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Verify Next.js build
+        run: npm run build
+
   build-tauri:
+    name: Build Tauri Bundles (${{ matrix.target }})
+    needs: verify
     strategy:
       fail-fast: false
       matrix:
@@ -66,8 +108,16 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev
 
-      - name: Install npm dependencies
-        run: npm ci
+      - name: Install JS dependencies
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f bun.lock ]; then
+            npx --yes bun install --frozen-lockfile
+          else
+            npm install --no-audit
+          fi
 
       - name: Build Tauri desktop bundles
         uses: tauri-apps/tauri-action@v0
@@ -82,4 +132,3 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }}
-

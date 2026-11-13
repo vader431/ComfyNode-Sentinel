@@ -3,16 +3,48 @@ import fs from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { resolveSafeSubpath, readGitMetadata } from '@/lib/server-fs';
+import {
+  collectPythonFiles,
+  expandHomeDir,
+  readGitMetadata,
+  resolveSafeSubpath,
+} from '@/lib/server-fs';
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Resolves a node directory inside custom_nodes/, automatically handling
+ * enabled/disabled (.disabled suffix) variants.
+ */
+function resolveExistingNodeFolder(
+  customNodesDir: string,
+  folderName: string
+): { actualFolderName: string; fullPath: string } | null {
+  if (!folderName || typeof folderName !== 'string') return null;
+
+  const primaryPath = resolveSafeSubpath(customNodesDir, folderName);
+  if (fs.existsSync(primaryPath)) {
+    return { actualFolderName: folderName, fullPath: primaryPath };
+  }
+
+  const alternateName = folderName.endsWith('.disabled')
+    ? folderName.replace(/\.disabled$/, '')
+    : `${folderName}.disabled`;
+  const alternatePath = resolveSafeSubpath(customNodesDir, alternateName);
+  if (fs.existsSync(alternatePath)) {
+    return { actualFolderName: alternateName, fullPath: alternatePath };
+  }
+
+  return null;
+}
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { action, comfyRoot } = body;
+    const { action } = body;
+    const comfyRoot = typeof body.comfyRoot === 'string' ? expandHomeDir(body.comfyRoot) : '';
 
-    if (!comfyRoot || typeof comfyRoot !== 'string' || !fs.existsSync(comfyRoot)) {
+    if (!comfyRoot || !fs.existsSync(comfyRoot)) {
       return NextResponse.json({ error: 'Invalid or missing comfyRoot path.' }, { status: 400 });
     }
 
@@ -22,50 +54,35 @@ export async function POST(req: NextRequest) {
     switch (action) {
       case 'toggle': {
         const { folderName } = body;
-        let actualFolderName = folderName;
-        let sourcePath = resolveSafeSubpath(customNodesDir, actualFolderName);
-        if (!fs.existsSync(sourcePath) && !actualFolderName.endsWith('.disabled')) {
-          const disabledCandidate = `${actualFolderName}.disabled`;
-          const disabledPath = resolveSafeSubpath(customNodesDir, disabledCandidate);
-          if (fs.existsSync(disabledPath)) {
-            actualFolderName = disabledCandidate;
-            sourcePath = disabledPath;
-          }
-        }
-        if (!fs.existsSync(sourcePath)) {
+        const resolved = resolveExistingNodeFolder(customNodesDir, folderName);
+        if (!resolved) {
           return NextResponse.json({ error: `Folder not found: ${folderName}` }, { status: 404 });
         }
-        const isDisabled = actualFolderName.endsWith('.disabled');
+        const isDisabled = resolved.actualFolderName.endsWith('.disabled');
         const newFolderName = isDisabled
-          ? actualFolderName.replace(/\.disabled$/, '')
-          : `${actualFolderName}.disabled`;
+          ? resolved.actualFolderName.replace(/\.disabled$/, '')
+          : `${resolved.actualFolderName}.disabled`;
         const targetPath = resolveSafeSubpath(customNodesDir, newFolderName);
 
-        fs.renameSync(sourcePath, targetPath);
+        fs.renameSync(resolved.fullPath, targetPath);
         return NextResponse.json({ success: true, newFolderName, enabled: isDisabled });
       }
 
       case 'uninstall': {
         const { folderName } = body;
-        let actualFolderName = folderName;
-        let sourcePath = resolveSafeSubpath(customNodesDir, actualFolderName);
-        if (!fs.existsSync(sourcePath) && !actualFolderName.endsWith('.disabled')) {
-          const disabledCandidate = `${actualFolderName}.disabled`;
-          const disabledPath = resolveSafeSubpath(customNodesDir, disabledCandidate);
-          if (fs.existsSync(disabledPath)) {
-            actualFolderName = disabledCandidate;
-            sourcePath = disabledPath;
-          }
-        }
-        if (!fs.existsSync(sourcePath)) {
+        const resolved = resolveExistingNodeFolder(customNodesDir, folderName);
+        if (!resolved) {
           return NextResponse.json({ error: `Folder not found: ${folderName}` }, { status: 404 });
         }
         fs.mkdirSync(trashDir, { recursive: true });
-        const targetPath = resolveSafeSubpath(trashDir, actualFolderName.replace(/\.disabled$/, ''));
+        const targetPath = resolveSafeSubpath(
+          trashDir,
+          resolved.actualFolderName.replace(/\.disabled$/, '')
+        );
         if (fs.existsSync(targetPath)) {
           fs.rmSync(targetPath, { recursive: true, force: true });
         }
-        fs.renameSync(sourcePath, targetPath);
+        fs.renameSync(resolved.fullPath, targetPath);
         return NextResponse.json({ success: true, movedTo: targetPath });
       }
 
@@ -82,14 +99,15 @@ export async function POST(req: NextRequest) {
 
       case 'normalize': {
         const { folderName, proposedName } = body;
-        const sourcePath = resolveSafeSubpath(customNodesDir, folderName);
-        if (!fs.existsSync(sourcePath)) {
+        const resolved = resolveExistingNodeFolder(customNodesDir, folderName);
+        if (!resolved) {
           return NextResponse.json({ error: `Folder not found: ${folderName}` }, { status: 404 });
         }
-        const isDisabled = folderName.endsWith('.disabled');
-        const finalName = isDisabled ? `${proposedName}.disabled` : proposedName;
+        const isDisabled = resolved.actualFolderName.endsWith('.disabled');
+        const cleanProposed = String(proposedName || '').replace(/\.disabled$/, '');
+        const finalName = isDisabled ? `${cleanProposed}.disabled` : cleanProposed;
         const targetPath = resolveSafeSubpath(customNodesDir, finalName);
-        fs.renameSync(sourcePath, targetPath);
+        fs.renameSync(resolved.fullPath, targetPath);
         return NextResponse.json({ success: true, newFolderName: finalName });
       }
 
@@ -148,7 +166,12 @@ export async function POST(req: NextRequest) {
           .readdirSync(customNodesDir, { withFileTypes: true })
           .filter((e) => e.isDirectory() && fs.existsSync(path.join(customNodesDir, e.name, '.git')));
 
-        const updates: { folderName: string; hasUpdate: boolean; behindCount: number; latestCommit?: string }[] = [];
+        const updates: {
+          folderName: string;
+          hasUpdate: boolean;
+          behindCount: number;
+          latestCommit?: string;
+        }[] = [];
         const concurrency = 6;
 
         for (let i = 0; i < entries.length; i += concurrency) {
@@ -180,7 +203,6 @@ export async function POST(req: NextRequest) {
                   latestCommit,
                 };
               } catch {
-                // Skip repos without upstream tracking branch
                 return null;
               }
             })
@@ -195,19 +217,22 @@ export async function POST(req: NextRequest) {
 
       case 'update': {
         const { folderName } = body;
-        const nodePath = resolveSafeSubpath(customNodesDir, folderName);
-        if (!fs.existsSync(path.join(nodePath, '.git'))) {
+        const resolved = resolveExistingNodeFolder(customNodesDir, folderName);
+        if (!resolved) {
+          return NextResponse.json({ error: `Folder not found: ${folderName}` }, { status: 404 });
+        }
+        if (!fs.existsSync(path.join(resolved.fullPath, '.git'))) {
           return NextResponse.json({ error: `${folderName} is not a git repository.` }, { status: 400 });
         }
-        const prevMeta = readGitMetadata(nodePath);
-        const { stdout, stderr } = await execFileAsync('git', ['-C', nodePath, 'pull'], {
+        const prevMeta = readGitMetadata(resolved.fullPath);
+        const { stdout, stderr } = await execFileAsync('git', ['-C', resolved.fullPath, 'pull'], {
           timeout: 60000,
         });
-        const newMeta = readGitMetadata(nodePath);
+        const newMeta = readGitMetadata(resolved.fullPath);
 
         return NextResponse.json({
           success: true,
-          folderName,
+          folderName: resolved.actualFolderName,
           previousCommit: prevMeta.currentCommit,
           newCommit: newMeta.currentCommit,
           output: (stdout + '\n' + stderr).trim(),
@@ -216,26 +241,45 @@ export async function POST(req: NextRequest) {
 
       case 'rollback': {
         const { folderName, commitHash } = body;
-        const nodePath = resolveSafeSubpath(customNodesDir, folderName);
-        if (!fs.existsSync(path.join(nodePath, '.git'))) {
+        const resolved = resolveExistingNodeFolder(customNodesDir, folderName);
+        if (!resolved) {
+          return NextResponse.json({ error: `Folder not found: ${folderName}` }, { status: 404 });
+        }
+        if (!fs.existsSync(path.join(resolved.fullPath, '.git'))) {
           return NextResponse.json({ error: `${folderName} is not a git repository.` }, { status: 400 });
         }
         const { stdout, stderr } = await execFileAsync(
           'git',
-          ['-C', nodePath, 'checkout', commitHash],
+          ['-C', resolved.fullPath, 'checkout', commitHash],
           { timeout: 30000 }
         );
         return NextResponse.json({
           success: true,
-          folderName,
+          folderName: resolved.actualFolderName,
           currentCommit: commitHash,
           output: (stdout + '\n' + stderr).trim(),
         });
       }
 
+      case 'list_files': {
+        const { folderName } = body;
+        const resolved = resolveExistingNodeFolder(customNodesDir, folderName);
+        if (!resolved) {
+          return NextResponse.json({ error: `Folder not found: ${folderName}`, files: [] }, { status: 404 });
+        }
+        const pyFiles = collectPythonFiles(resolved.fullPath, 40).map((absPath) =>
+          path.relative(resolved.fullPath, absPath).replace(/\\/g, '/')
+        );
+        return NextResponse.json({ success: true, files: pyFiles });
+      }
+
       case 'read_file': {
         const { folderName, relativeFile } = body;
-        const filePath = resolveSafeSubpath(customNodesDir, folderName, relativeFile);
+        const resolved = resolveExistingNodeFolder(customNodesDir, folderName);
+        if (!resolved) {
+          return NextResponse.json({ error: `Folder not found: ${folderName}` }, { status: 404 });
+        }
+        const filePath = resolveSafeSubpath(resolved.fullPath, relativeFile);
         if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
           return NextResponse.json({ error: 'File not found' }, { status: 404 });
         }
@@ -243,9 +287,116 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: true, content });
       }
 
+      case 'read_readme': {
+        const { folderName } = body;
+        const resolved = resolveExistingNodeFolder(customNodesDir, folderName);
+        if (!resolved) {
+          return NextResponse.json({ error: `Folder not found: ${folderName}` }, { status: 404 });
+        }
+        const candidates = ['README.md', 'readme.md', 'Readme.md', 'README.MD', 'README.rst', 'README.txt', 'README'];
+        for (const candidate of candidates) {
+          const filePath = resolveSafeSubpath(resolved.fullPath, candidate);
+          if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+            const content = fs.readFileSync(filePath, 'utf-8');
+            return NextResponse.json({ success: true, fileName: candidate, content });
+          }
+        }
+        return NextResponse.json({ error: 'No README file found in node directory.' }, { status: 404 });
+      }
+
+      case 'reinstall': {
+        const { folderName, gitUrl } = body;
+        const resolved = resolveExistingNodeFolder(customNodesDir, folderName);
+        if (!resolved) {
+          return NextResponse.json({ error: `Folder not found: ${folderName}` }, { status: 404 });
+        }
+        const targetFolder = resolved.actualFolderName;
+        const nodePath = resolved.fullPath;
+
+        let output = '';
+        if (fs.existsSync(path.join(nodePath, '.git'))) {
+          const fetchRes = await execFileAsync('git', ['-C', nodePath, 'fetch', '--all'], {
+            timeout: 60000,
+          });
+          const resetRes = await execFileAsync('git', ['-C', nodePath, 'reset', '--hard', 'HEAD'], {
+            timeout: 30000,
+          });
+          const pullRes = await execFileAsync('git', ['-C', nodePath, 'pull', '--ff-only'], {
+            timeout: 60000,
+          }).catch((e: unknown) => ({
+            stdout: '',
+            stderr: e instanceof Error ? e.message : 'pull skipped',
+          }));
+          output = [
+            fetchRes.stdout,
+            fetchRes.stderr,
+            resetRes.stdout,
+            resetRes.stderr,
+            pullRes.stdout,
+            pullRes.stderr,
+          ]
+            .filter(Boolean)
+            .join('\n')
+            .trim();
+        } else if (gitUrl && typeof gitUrl === 'string') {
+          fs.mkdirSync(trashDir, { recursive: true });
+          const backupPath = resolveSafeSubpath(trashDir, `${targetFolder}.reinstall-bak`);
+          if (fs.existsSync(backupPath)) {
+            fs.rmSync(backupPath, { recursive: true, force: true });
+          }
+          fs.renameSync(nodePath, backupPath);
+          try {
+            const cloneRes = await execFileAsync(
+              'git',
+              ['clone', '--depth', '1', gitUrl.trim(), nodePath],
+              { timeout: 120000 }
+            );
+            output = [cloneRes.stdout, cloneRes.stderr].filter(Boolean).join('\n').trim();
+            fs.rmSync(backupPath, { recursive: true, force: true });
+          } catch (cloneErr) {
+            if (fs.existsSync(nodePath)) {
+              fs.rmSync(nodePath, { recursive: true, force: true });
+            }
+            if (fs.existsSync(backupPath)) {
+              fs.renameSync(backupPath, nodePath);
+            }
+            throw cloneErr;
+          }
+        } else {
+          return NextResponse.json(
+            { error: `${folderName} is not a git repository and no gitUrl was provided.` },
+            { status: 400 }
+          );
+        }
+
+        const meta = readGitMetadata(nodePath);
+        let requirements: string[] = [];
+        const reqFile = path.join(nodePath, 'requirements.txt');
+        if (fs.existsSync(reqFile)) {
+          requirements = fs
+            .readFileSync(reqFile, 'utf-8')
+            .split(/\r?\n/)
+            .map((l) => l.trim())
+            .filter((l) => l && !l.startsWith('#'));
+        }
+
+        return NextResponse.json({
+          success: true,
+          folderName: targetFolder,
+          currentCommit: meta.currentCommit,
+          branch: meta.branch,
+          requirements,
+          output,
+        });
+      }
+
       case 'patch_file': {
         const { folderName, relativeFile, content } = body;
-        const filePath = resolveSafeSubpath(customNodesDir, folderName, relativeFile);
+        const resolved = resolveExistingNodeFolder(customNodesDir, folderName);
+        if (!resolved) {
+          return NextResponse.json({ error: `Folder not found: ${folderName}` }, { status: 404 });
+        }
+        const filePath = resolveSafeSubpath(resolved.fullPath, relativeFile);
         if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
           return NextResponse.json({ error: 'File not found' }, { status: 404 });
         }
@@ -263,4 +414,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-

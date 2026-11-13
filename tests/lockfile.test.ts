@@ -125,5 +125,39 @@ describe('lockfile', () => {
     expect(script).toContain('mv "custom_nodes/ComfyUI-Manager" "custom_nodes/ComfyUI-Manager.disabled"');
     expect(script).toContain('python3 main.py --listen 0.0.0.0 --port 8188');
   });
+
+  it('strips .disabled suffix from exported lockfile names and matches disabled folders during reconciliation', () => {
+    const disabledOnDisk: InstalledNode[] = [
+      {
+        ...mockNodes[1],
+        folderName: 'ComfyUI-Manager.disabled',
+        enabled: false,
+      },
+    ];
+
+    const exported = generateComfyLockfile(disabledOnDisk);
+    expect(exported.nodes[0].name).toBe('ComfyUI-Manager');
+    expect(exported.nodes[0].enabled_state).toBe(false);
+
+    const recon = calculateReconciliation(disabledOnDisk, {
+      version: '1.0.0',
+      generated_at: '2026-11-12T00:00:00.000Z',
+      comfyui_version: 'v0.3.18',
+      nodes: [
+        {
+          name: 'ComfyUI-Manager',
+          url: 'https://github.com/ltdrdata/ComfyUI-Manager.git',
+          commit_hash: 'a1b2c3d4e5f6',
+          branch: 'main',
+          enabled_state: true,
+        },
+      ],
+    });
+
+    expect(recon.actionsCount.clone).toBe(0);
+    expect(recon.actionsCount.toggle_state).toBe(1);
+    expect(recon.items[0].name).toBe('ComfyUI-Manager.disabled');
+  });
 });
+
 

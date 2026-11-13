@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Layers,
   Search,
@@ -23,8 +23,70 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  PowerOff,
+  FileText,
+  RefreshCw,
+  Eye,
+  EyeOff,
+  LayoutGrid,
+  List,
+  Info,
 } from 'lucide-react';
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip as RechartsTooltip,
+  Cell,
+  PieChart as RechartsPieChart,
+  Pie,
+} from 'recharts';
 import { InstalledNode } from '@/types';
+
+interface CategoryChartDatum {
+  category: string;
+  count: number;
+  totalMb: number;
+  percentage: number;
+  sizePercentage: number;
+  color: string;
+}
+
+function CategoryTooltipContent({
+  active,
+  payload,
+  metric,
+}: {
+  active?: boolean;
+  payload?: ReadonlyArray<{ payload?: CategoryChartDatum }>;
+  metric: 'count' | 'size';
+}) {
+  if (!active || !payload || payload.length === 0 || !payload[0]?.payload) {
+    return null;
+  }
+  const d = payload[0].payload;
+  return (
+    <div className="rounded-lg border border-slate-700 bg-slate-900/95 px-3 py-2 text-[11px] shadow-xl backdrop-blur-sm">
+      <div className="flex items-center gap-2 font-semibold text-white">
+        <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: d.color }} />
+        <span>{d.category}</span>
+      </div>
+      <div className="mt-1 font-mono tabular-nums text-slate-300">
+        {metric === 'count' ? (
+          <span>
+            {d.count} {d.count === 1 ? 'node' : 'nodes'} ({d.percentage}%) · {d.totalMb} MB
+          </span>
+        ) : (
+          <span>
+            {d.totalMb} MB ({d.sizePercentage}%) · {d.count} {d.count === 1 ? 'node' : 'nodes'}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 interface InspectorViewProps {
   nodes: InstalledNode[];
@@ -34,6 +96,12 @@ interface InspectorViewProps {
   aliases: Record<string, string>;
   onUpdateAlias: (folderName: string, alias: string) => void;
   onToggleNodeState: (folderName: string) => void;
+  onDisableAllNodes?: () => void;
+  onUpdateSingleNode?: (folderName: string) => Promise<{ ok: boolean; message: string } | void> | void;
+  onForceReinstallNode?: (node: InstalledNode) => Promise<void> | void;
+  onReadNodeReadme?: (
+    node: InstalledNode
+  ) => Promise<{ content: string; fileName: string; source: string; error?: string }>;
   onUninstallNode: (folderName: string) => void;
   onRestoreNode: (folderName: string) => void;
   onNormalizeBatch: (replacements: { original: string; proposed: string }[]) => void;
@@ -49,6 +117,10 @@ export function InspectorView({
   aliases,
   onUpdateAlias,
   onToggleNodeState,
+  onDisableAllNodes,
+  onUpdateSingleNode,
+  onForceReinstallNode,
+  onReadNodeReadme,
   onUninstallNode,
   onRestoreNode,
   onNormalizeBatch,
@@ -58,6 +130,7 @@ export function InspectorView({
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'enabled' | 'disabled' | 'updates'>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
   const [copiedCommit, setCopiedCommit] = useState<string | null>(null);
   const [showTrashModal, setShowTrashModal] = useState(false);
   const [showNormalizerModal, setShowNormalizerModal] = useState(false);
@@ -65,12 +138,30 @@ export function InspectorView({
   const [aliasInputValue, setAliasInputValue] = useState('');
   const [repoLimit, setRepoLimit] = useState<number>(5);
   const [pieMetric, setPieMetric] = useState<'count' | 'size'>('count');
+  const [chartType, setChartType] = useState<'bar' | 'pie'>('bar');
   const [hoveredCategory, setHoveredCategory] = useState<string | null>(null);
   const [sortField, setSortField] = useState<'name' | 'size' | 'health'>('name');
   const [sortAsc, setSortAsc] = useState<boolean>(true);
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
   const [drawerNodeId, setDrawerNodeId] = useState<string | null>(null);
-  const [showCharts, setShowCharts] = useState<boolean>(false);
+  const [showCharts, setShowCharts] = useState<boolean>(true);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    nodeId: string;
+  } | null>(null);
+  const [reinstallingFolder, setReinstallingFolder] = useState<string | null>(null);
+  const [updatingFolder, setUpdatingFolder] = useState<string | null>(null);
+  const [readmeModal, setReadmeModal] = useState<{
+    node: InstalledNode;
+    loading: boolean;
+    content: string;
+    fileName: string;
+    source: string;
+    error?: string;
+  } | null>(null);
+  const [copiedReadme, setCopiedReadme] = useState(false);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
 
   // Categories
   const categories = Array.from(new Set(nodes.map((n) => n.category))).filter(Boolean);
@@ -129,52 +220,12 @@ export function InspectorView({
         sizePercentage: totalDiskMb > 0 ? Math.round((data.totalMb / totalDiskMb) * 100) : 0,
         color: colorPalette[idx % colorPalette.length],
       }))
-      .sort((a, b) => b.totalMb - a.totalMb);
-  }, [nodes, totalDiskMb]);
-
-  // Generate SVG Pie Slices for Category Breakdown with Metric Toggle
-  const pieSlices = React.useMemo(() => {
-    const total = pieMetric === 'count' ? nodes.length : totalDiskMb;
-    if (total === 0) return [];
-
-    let currentAngle = -Math.PI / 2; // start from 12 o'clock (top)
-    const cx = 50;
-    const cy = 50;
-    const radius = 42;
-
-    return categoryStats.map((item) => {
-      const val = pieMetric === 'count' ? item.count : item.totalMb;
-      const sliceAngle = total > 0 ? (val / total) * 2 * Math.PI : 0;
-      const startAngle = currentAngle;
-      const endAngle = currentAngle + sliceAngle;
-      currentAngle = endAngle;
-
-      const x1 = cx + radius * Math.cos(startAngle);
-      const y1 = cy + radius * Math.sin(startAngle);
-      const x2 = cx + radius * Math.cos(endAngle);
-      const y2 = cy + radius * Math.sin(endAngle);
-
-      const largeArcFlag = sliceAngle > Math.PI ? 1 : 0;
-      const isFull = sliceAngle >= 2 * Math.PI - 0.001;
-
-      const pathData = isFull
-        ? `M ${cx} ${cy - radius} A ${radius} ${radius} 0 1 1 ${cx} ${cy + radius} A ${radius} ${radius} 0 1 1 ${cx} ${cy - radius} Z`
-        : `M ${cx} ${cy} L ${x1.toFixed(3)} ${y1.toFixed(3)} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2.toFixed(3)} ${y2.toFixed(3)} Z`;
-
-      const slicePercentage = total > 0 ? Math.round((val / total) * 100) : 0;
-
-      return {
-        ...item,
-        pathData,
-        slicePercentage,
-      };
-    });
-  }, [categoryStats, nodes.length, totalDiskMb, pieMetric]);
-
-  const hoveredCategoryData = React.useMemo(() => {
-    if (!hoveredCategory) return null;
-    return categoryStats.find((c) => c.category === hoveredCategory) || null;
-  }, [categoryStats, hoveredCategory]);
+      .sort((a, b) =>
+        pieMetric === 'count'
+          ? b.count - a.count || b.totalMb - a.totalMb
+          : b.totalMb - a.totalMb
+      );
+  }, [nodes, totalDiskMb, pieMetric]);
 
   // Disk Space Usage per Repository (ranked descending)
   const reposBySize = React.useMemo(() => {
@@ -251,6 +302,8 @@ export function InspectorView({
     });
   };
 
+  const [massActionMessage, setMassActionMessage] = useState<string | null>(null);
+
   const handleBatchToggleState = (targetEnabled: boolean) => {
     for (const node of nodes) {
       if (selectedNodeIds.has(node.id) && node.enabled !== targetEnabled) {
@@ -259,7 +312,148 @@ export function InspectorView({
     }
   };
 
+  const handleDisableAllNodesClick = () => {
+    const previouslyActiveCount = nodes.filter((n) => n.enabled).length;
+    if (onDisableAllNodes) {
+      onDisableAllNodes();
+    } else {
+      for (const node of nodes) {
+        if (node.enabled) {
+          onToggleNodeState(node.folderName);
+        }
+      }
+    }
+    setMassActionMessage(
+      `[Batch State Toggle] Disabled all ${previouslyActiveCount} active nodes (${nodes.length} total repositories set to .disabled) and logged to Runner console.`
+    );
+  };
+
   const drawerNode = nodes.find((n) => n.id === drawerNodeId) || null;
+  const contextMenuNode = contextMenu ? nodes.find((n) => n.id === contextMenu.nodeId) || null : null;
+
+  useEffect(() => {
+    if (!contextMenu) return;
+
+    const handleMouseDown = (event: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(event.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setContextMenu(null);
+      }
+    };
+
+    const handleViewportChange = () => {
+      setContextMenu(null);
+    };
+
+    window.addEventListener('mousedown', handleMouseDown);
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('scroll', handleViewportChange, true);
+    window.addEventListener('resize', handleViewportChange);
+
+    return () => {
+      window.removeEventListener('mousedown', handleMouseDown);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('scroll', handleViewportChange, true);
+      window.removeEventListener('resize', handleViewportChange);
+    };
+  }, [contextMenu]);
+
+  const normalizeGitHubHref = (gitUrl: string): string | null => {
+    const trimmed = (gitUrl || '').trim();
+    if (!trimmed) return null;
+    const normalized = trimmed
+      .replace(/^git@github\.com:/i, 'https://github.com/')
+      .replace(/\.git$/i, '');
+    if (normalized.startsWith('http://') || normalized.startsWith('https://')) {
+      return normalized;
+    }
+    return null;
+  };
+
+  const handleOpenContextMenu = (e: React.MouseEvent, node: InstalledNode) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const menuWidth = 240;
+    const menuHeight = 290;
+    const clampedX = Math.min(e.clientX, Math.max(8, window.innerWidth - menuWidth - 8));
+    const clampedY = Math.min(e.clientY, Math.max(8, window.innerHeight - menuHeight - 8));
+
+    setContextMenu({
+      x: clampedX,
+      y: clampedY,
+      nodeId: node.id,
+    });
+  };
+
+  const handleViewReadme = async (node: InstalledNode) => {
+    setContextMenu(null);
+    setReadmeModal({
+      node,
+      loading: true,
+      content: '',
+      fileName: 'README.md',
+      source: 'Reading repository documentation...',
+    });
+
+    if (onReadNodeReadme) {
+      const result = await onReadNodeReadme(node);
+      setReadmeModal({
+        node,
+        loading: false,
+        content: result.content,
+        fileName: result.fileName,
+        source: result.source,
+        error: result.error,
+      });
+      return;
+    }
+
+    const fallback = [
+      `# ${aliases[node.folderName] || node.cleanDisplayName}`,
+      '',
+      node.description || 'No description provided.',
+      '',
+      `- Folder: ${node.folderName}`,
+      `- Author: @${node.author}`,
+      `- Category: ${node.category}`,
+      `- Git URL: ${node.gitUrl}`,
+    ].join('\n');
+
+    setReadmeModal({
+      node,
+      loading: false,
+      content: fallback,
+      fileName: 'README.md',
+      source: 'Indexed repository metadata',
+    });
+  };
+
+  const handleForceReinstall = async (node: InstalledNode) => {
+    setContextMenu(null);
+    if (onForceReinstallNode) {
+      setReinstallingFolder(node.folderName);
+      setMassActionMessage(`[Force Reinstall] Reinstalling ${node.folderName} and verifying dependencies...`);
+      try {
+        await onForceReinstallNode(node);
+        setMassActionMessage(
+          `[Force Reinstall] Completed force reinstall pipeline for ${node.folderName}.`
+        );
+      } finally {
+        setReinstallingFolder(null);
+      }
+      return;
+    }
+
+    onNavigateToRunner(
+      `git -C custom_nodes/${node.folderName} fetch --all && git -C custom_nodes/${node.folderName} reset --hard HEAD && pip install -r custom_nodes/${node.folderName}/requirements.txt`
+    );
+  };
 
   const handleCopyCommit = (commit: string) => {
     navigator.clipboard.writeText(commit);
@@ -329,10 +523,26 @@ export function InspectorView({
               </button>
             </div>
 
+            {/* Disable All Nodes Batch Button */}
+            <button
+              type="button"
+              onClick={handleDisableAllNodesClick}
+              disabled={activeCount === 0}
+              title={
+                activeCount === 0
+                  ? 'All custom nodes are already disabled'
+                  : `Disable all ${activeCount} active custom node repositories`
+              }
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-300 hover:text-amber-200 bg-amber-950/40 hover:bg-amber-900/50 border border-amber-800/60 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap shrink-0"
+            >
+              <PowerOff className="w-3.5 h-3.5 text-amber-400" />
+              <span>Disable All Nodes</span>
+            </button>
+
             {/* Folder Normalizer Button */}
             <button
               onClick={() => setShowNormalizerModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors whitespace-nowrap shrink-0"
             >
               <Wand2 className="w-3.5 h-3.5 text-indigo-400" />
               <span>Normalizer Tool ({normalizerCandidates.length})</span>
@@ -354,13 +564,27 @@ export function InspectorView({
             {/* Safe Trash Bin */}
             <button
               onClick={() => setShowTrashModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white bg-slate-800/60 hover:bg-slate-800 border border-slate-700 rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white bg-slate-800/60 hover:bg-slate-800 border border-slate-700 rounded-lg transition-colors whitespace-nowrap shrink-0"
             >
               <Trash2 className="w-3.5 h-3.5 text-slate-400" />
               <span>Trash Bin ({trashNodes.length})</span>
             </button>
           </div>
         </div>
+
+        {massActionMessage && (
+          <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-amber-800/60 bg-amber-950/30 px-3.5 py-2 text-xs text-amber-200 font-mono">
+            <span>{massActionMessage}</span>
+            <button
+              type="button"
+              onClick={() => setMassActionMessage(null)}
+              className="text-amber-400 hover:text-white transition-colors"
+              title="Dismiss notification"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* Quick KPI Strip */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-5 border-t border-slate-800/80 text-xs">
@@ -405,191 +629,300 @@ export function InspectorView({
           </div>
         </div>
 
+        {/* Always-Visible Disk Space Allocation Progress Bar */}
+        {nodes.length > 0 && (() => {
+          const activeMb = Math.round(
+            nodes.filter((n) => n.enabled).reduce((acc, n) => acc + (Number(n.sizeMb) || 0), 0) * 10
+          ) / 10;
+          const disabledMb = Math.max(0, Math.round((totalDiskMb - activeMb) * 10) / 10);
+          const activePct = totalDiskMb > 0 ? Math.round((activeMb / totalDiskMb) * 100) : 0;
+          const disabledPct = Math.max(0, 100 - activePct);
+          const topSharePct = totalDiskMb > 0 && reposBySize[0] ? Math.round((reposBySize[0].sizeMb / totalDiskMb) * 100) : 0;
+
+          return (
+            <div className="mt-5 pt-4 border-t border-slate-800/80">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] mb-2">
+                <div className="flex items-center gap-2 text-slate-300 font-medium">
+                  <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>custom_nodes/ Directory Disk Space Usage</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-3 font-mono text-[11px] tabular-nums text-slate-400">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                    <span>Active: {formatStorage(activeMb)} ({activePct}%)</span>
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-slate-500" />
+                    <span>Disabled: {formatStorage(disabledMb)} ({disabledPct}%)</span>
+                  </span>
+                  {reposBySize[0] && (
+                    <span className="text-indigo-300">
+                      Top: {reposBySize[0].folderName} ({topSharePct}%)
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div
+                className="h-2.5 w-full rounded-full bg-slate-950 border border-slate-800 overflow-hidden flex"
+                role="progressbar"
+                aria-label="Custom node directory disk space usage"
+                aria-valuenow={activePct}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              >
+                {activeMb > 0 && (
+                  <div
+                    className="h-full bg-gradient-to-r from-emerald-500 to-indigo-500 transition-all duration-300"
+                    style={{ width: `${activePct}%` }}
+                    title={`Active custom nodes: ${formatStorage(activeMb)} (${activePct}%)`}
+                  />
+                )}
+                {disabledMb > 0 && (
+                  <div
+                    className="h-full bg-slate-600/80 transition-all duration-300"
+                    style={{ width: `${disabledPct}%` }}
+                    title={`Disabled custom nodes: ${formatStorage(disabledMb)} (${disabledPct}%)`}
+                  />
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Mini Charts Visualization Panel (Collapsible) */}
         {showCharts && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6 pt-6 border-t border-slate-800/80">
-          {/* Mini Chart 1: Category Distribution Pie Chart */}
+          {/* Mini Chart 1: Recharts Category Distribution Chart */}
           <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-4 flex flex-col justify-between">
             <div>
-              <div className="flex items-center justify-between pb-2 border-b border-slate-800/70">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800/70">
                 <div className="flex items-center gap-2">
                   <PieChart className="w-3.5 h-3.5 text-indigo-400" />
                   <h3 className="text-xs font-semibold text-slate-200">
-                    Category Composition Pie Chart
+                    Node Library Distribution by Category
                   </h3>
                 </div>
 
-                {/* Metric Mode Toggle: Count vs Disk Size */}
-                <div className="flex items-center gap-1 text-[11px]">
-                  <button
-                    onClick={() => setPieMetric('count')}
-                    className={`px-2 py-0.5 rounded font-mono ${
-                      pieMetric === 'count'
-                        ? 'bg-slate-800 text-indigo-300 border border-slate-700'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    Count
-                  </button>
-                  <button
-                    onClick={() => setPieMetric('size')}
-                    className={`px-2 py-0.5 rounded font-mono ${
-                      pieMetric === 'size'
-                        ? 'bg-slate-800 text-indigo-300 border border-slate-700'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    Size (MB)
-                  </button>
+                <div className="flex items-center gap-2">
+                  {/* Chart Type Toggle: Bar vs Pie */}
+                  <div className="flex items-center gap-1 text-[11px] bg-slate-900 rounded p-0.5 border border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setChartType('bar')}
+                      className={`px-2 py-0.5 rounded font-mono transition-colors ${
+                        chartType === 'bar'
+                          ? 'bg-slate-800 text-indigo-300'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Bar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setChartType('pie')}
+                      className={`px-2 py-0.5 rounded font-mono transition-colors ${
+                        chartType === 'pie'
+                          ? 'bg-slate-800 text-indigo-300'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Pie
+                    </button>
+                  </div>
+
+                  {/* Metric Mode Toggle: Count vs Disk Size */}
+                  <div className="flex items-center gap-1 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => setPieMetric('count')}
+                      className={`px-2 py-0.5 rounded font-mono ${
+                        pieMetric === 'count'
+                          ? 'bg-slate-800 text-indigo-300 border border-slate-700'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Count
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPieMetric('size')}
+                      className={`px-2 py-0.5 rounded font-mono ${
+                        pieMetric === 'size'
+                          ? 'bg-slate-800 text-indigo-300 border border-slate-700'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Size (MB)
+                    </button>
+                  </div>
                 </div>
               </div>
 
               <p className="text-[11px] text-slate-400 mt-2 mb-3">
-                Distribution of custom nodes by category ({pieMetric === 'count' ? 'node count' : 'disk footprint'}). Click any slice to filter the inventory below.
+                {pieMetric === 'count' ? 'Number of installed custom nodes' : 'Storage footprint (MB)'} per category. Click any bar, slice, or legend item to filter.
               </p>
 
-              {/* Mini Pie Chart + Legend Layout */}
-              <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-6 mt-1">
-                {/* SVG Vector Mini Pie Chart */}
-                <div className="relative shrink-0 flex items-center justify-center p-1">
-                  <svg
-                    width="118"
-                    height="118"
-                    viewBox="0 0 100 100"
-                    className="overflow-visible select-none drop-shadow-sm"
-                  >
-                    {pieSlices.map((slice) => {
-                      const isSelected = categoryFilter === slice.category;
-                      const isHovered = hoveredCategory === slice.category;
+              {categoryStats.length === 0 ? (
+                <div className="h-44 flex items-center justify-center text-xs text-slate-500 font-mono">
+                  No category data available.
+                </div>
+              ) : (
+                <div className="flex flex-col sm:flex-row items-center gap-4 mt-1">
+                  {/* Recharts Responsive Chart */}
+                  <div className="w-full sm:w-[58%] h-44 min-w-0">
+                    <ResponsiveContainer width="100%" height="100%">
+                      {chartType === 'bar' ? (
+                        <BarChart
+                          data={categoryStats}
+                          margin={{ top: 6, right: 8, left: -24, bottom: 2 }}
+                        >
+                          <XAxis
+                            dataKey="category"
+                            tick={{ fill: '#94a3b8', fontSize: 10 }}
+                            axisLine={{ stroke: '#1e293b' }}
+                            tickLine={false}
+                            interval={0}
+                            tickFormatter={(val: string) =>
+                              val.length > 9 ? `${val.slice(0, 8)}…` : val
+                            }
+                          />
+                          <YAxis
+                            allowDecimals={pieMetric === 'size'}
+                            tick={{ fill: '#64748b', fontSize: 10 }}
+                            axisLine={false}
+                            tickLine={false}
+                          />
+                          <RechartsTooltip
+                            cursor={{ fill: 'rgba(99, 102, 241, 0.08)' }}
+                            content={<CategoryTooltipContent metric={pieMetric} />}
+                          />
+                          <Bar
+                            dataKey={pieMetric === 'count' ? 'count' : 'totalMb'}
+                            radius={[4, 4, 0, 0]}
+                            maxBarSize={36}
+                            onClick={(entry) => {
+                              const cat = (entry as unknown as { category?: string })?.category;
+                              if (cat) {
+                                setCategoryFilter(categoryFilter === cat ? 'all' : cat);
+                              }
+                            }}
+                            className="cursor-pointer"
+                          >
+                            {categoryStats.map((entry) => {
+                              const isSelected = categoryFilter === entry.category;
+                              const isDimmed =
+                                (categoryFilter !== 'all' && !isSelected) ||
+                                (hoveredCategory !== null && hoveredCategory !== entry.category);
+                              return (
+                                <Cell
+                                  key={entry.category}
+                                  fill={entry.color}
+                                  fillOpacity={isDimmed ? 0.35 : 1}
+                                  stroke={isSelected ? '#ffffff' : 'none'}
+                                  strokeWidth={isSelected ? 1.5 : 0}
+                                />
+                              );
+                            })}
+                          </Bar>
+                        </BarChart>
+                      ) : (
+                        <RechartsPieChart>
+                          <Pie
+                            data={categoryStats}
+                            dataKey={pieMetric === 'count' ? 'count' : 'totalMb'}
+                            nameKey="category"
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={36}
+                            outerRadius={66}
+                            paddingAngle={2}
+                            stroke="#070a0f"
+                            strokeWidth={1.5}
+                            onClick={(entry) => {
+                              const cat = (entry as unknown as { category?: string })?.category;
+                              if (cat) {
+                                setCategoryFilter(categoryFilter === cat ? 'all' : cat);
+                              }
+                            }}
+                            className="cursor-pointer focus:outline-none"
+                          >
+                            {categoryStats.map((entry) => {
+                              const isSelected = categoryFilter === entry.category;
+                              const isDimmed =
+                                (categoryFilter !== 'all' && !isSelected) ||
+                                (hoveredCategory !== null && hoveredCategory !== entry.category);
+                              return (
+                                <Cell
+                                  key={entry.category}
+                                  fill={entry.color}
+                                  fillOpacity={isDimmed ? 0.35 : 1}
+                                />
+                              );
+                            })}
+                          </Pie>
+                          <RechartsTooltip
+                            content={<CategoryTooltipContent metric={pieMetric} />}
+                          />
+                        </RechartsPieChart>
+                      )}
+                    </ResponsiveContainer>
+                  </div>
+
+                  {/* Category Legend & Breakdown List */}
+                  <div className="grid grid-cols-2 sm:grid-cols-1 gap-1.5 flex-1 w-full max-h-44 overflow-y-auto pr-1">
+                    {categoryStats.map((cat) => {
+                      const isSelected = categoryFilter === cat.category;
+                      const isHovered = hoveredCategory === cat.category;
 
                       return (
-                        <path
-                          key={slice.category}
-                          d={slice.pathData}
-                          fill={slice.color}
-                          stroke="#070a0f"
-                          strokeWidth="1.5"
-                          onMouseEnter={() => setHoveredCategory(slice.category)}
+                        <button
+                          key={cat.category}
+                          type="button"
+                          onMouseEnter={() => setHoveredCategory(cat.category)}
                           onMouseLeave={() => setHoveredCategory(null)}
                           onClick={() =>
-                            setCategoryFilter(isSelected ? 'all' : slice.category)
+                            setCategoryFilter(isSelected ? 'all' : cat.category)
                           }
-                          className="cursor-pointer transition-all duration-200 hover:opacity-90 focus:outline-none"
-                          style={{
-                            transformOrigin: '50px 50px',
-                            transform: isSelected ? 'scale(1.08)' : isHovered ? 'scale(1.05)' : 'scale(1)',
-                            filter: isSelected || isHovered ? 'drop-shadow(0 0 6px rgba(255,255,255,0.45))' : 'none',
-                          }}
+                          className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded text-left transition-colors ${
+                            isSelected
+                              ? 'bg-slate-800/90 border border-slate-700'
+                              : isHovered
+                              ? 'bg-slate-900 border border-slate-700/60'
+                              : 'hover:bg-slate-900/80 border border-transparent'
+                          }`}
                         >
-                          <title>{`${slice.category}: ${slice.count} nodes (${slice.percentage}%), ${slice.totalMb} MB`}</title>
-                        </path>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span
+                              className="w-2 h-2 rounded-full shrink-0"
+                              style={{ backgroundColor: cat.color }}
+                            />
+                            <span className="text-[11px] font-medium text-slate-200 truncate">
+                              {cat.category}
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-slate-400 font-mono tabular-nums shrink-0">
+                            {pieMetric === 'count'
+                              ? `${cat.count} (${cat.percentage}%)`
+                              : `${cat.totalMb}MB`}
+                          </span>
+                        </button>
                       );
                     })}
-
-                    {/* Donut Core */}
-                    <circle cx="50" cy="50" r="22" fill="#070a0f" stroke="#1e293b" strokeWidth="1" />
-                    {hoveredCategoryData ? (
-                      <>
-                        <text
-                          x="50"
-                          y="43"
-                          textAnchor="middle"
-                          className="text-[10px] font-mono font-bold fill-indigo-300 tabular-nums"
-                        >
-                          {pieMetric === 'count' ? `${hoveredCategoryData.percentage}%` : `${hoveredCategoryData.sizePercentage}%`}
-                        </text>
-                        <text
-                          x="50"
-                          y="53"
-                          textAnchor="middle"
-                          className="text-[6.5px] font-sans font-medium fill-slate-200 truncate"
-                        >
-                          {hoveredCategoryData.category.slice(0, 10)}
-                        </text>
-                        <text
-                          x="50"
-                          y="62"
-                          textAnchor="middle"
-                          className="text-[6px] font-mono fill-slate-400"
-                        >
-                          {pieMetric === 'count' ? `${hoveredCategoryData.count} node` : `${hoveredCategoryData.totalMb}MB`}
-                        </text>
-                      </>
-                    ) : (
-                      <>
-                        <text
-                          x="50"
-                          y="47"
-                          textAnchor="middle"
-                          className="text-[11px] font-mono font-bold fill-slate-100 tabular-nums"
-                        >
-                          {pieMetric === 'count' ? nodes.length : `${totalDiskMb}M`}
-                        </text>
-                        <text
-                          x="50"
-                          y="58"
-                          textAnchor="middle"
-                          className="text-[7.5px] font-mono fill-slate-400 tracking-wider"
-                        >
-                          {pieMetric === 'count' ? 'NODES' : 'STORAGE'}
-                        </text>
-                      </>
-                    )}
-                  </svg>
+                  </div>
                 </div>
+              )}
 
-                {/* Category Legend & Breakdown List */}
-                <div className="grid grid-cols-2 gap-2 flex-1 w-full">
-                  {categoryStats.map((cat) => {
-                    const isSelected = categoryFilter === cat.category;
-                    const isHovered = hoveredCategory === cat.category;
-
-                    return (
-                      <button
-                        key={cat.category}
-                        onMouseEnter={() => setHoveredCategory(cat.category)}
-                        onMouseLeave={() => setHoveredCategory(null)}
-                        onClick={() =>
-                          setCategoryFilter(isSelected ? 'all' : cat.category)
-                        }
-                        className={`flex items-start gap-2 p-1.5 rounded text-left transition-colors ${
-                          isSelected
-                            ? 'bg-slate-800/90 border border-slate-700'
-                            : isHovered
-                            ? 'bg-slate-900 border border-slate-700/60'
-                            : 'hover:bg-slate-900/80 border border-transparent'
-                        }`}
-                      >
-                        <span
-                          className="w-2 h-2 rounded-full shrink-0 mt-1"
-                          style={{ backgroundColor: cat.color }}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="text-[11px] font-medium text-slate-200 truncate">
-                            {cat.category}
-                          </div>
-                          <div className="text-[10px] text-slate-400 font-mono tabular-nums">
-                            {pieMetric === 'count'
-                              ? `${cat.count} nodes · ${cat.percentage}%`
-                              : `${cat.totalMb} MB · ${cat.sizePercentage}%`}
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Stacked Proportional Bar Indicator Below Pie */}
+              {/* Stacked Proportional Bar Indicator Below Chart */}
               <div className="mt-4 pt-3 border-t border-slate-800/60">
                 <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 mb-1">
                   <span>Proportional Footprint</span>
-                  <span>{totalDiskMb} MB total</span>
+                  <span>{nodes.length} nodes · {totalDiskMb} MB total</span>
                 </div>
                 <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden flex shadow-inner">
                   {categoryStats.map((cat) => (
                     <button
                       key={cat.category}
+                      type="button"
                       onMouseEnter={() => setHoveredCategory(cat.category)}
                       onMouseLeave={() => setHoveredCategory(null)}
                       onClick={() =>
@@ -597,7 +930,7 @@ export function InspectorView({
                       }
                       title={`${cat.category}: ${cat.count} nodes (${cat.percentage}%), ${cat.totalMb} MB`}
                       style={{
-                        width: `${Math.max(cat.sizePercentage, 3)}%`,
+                        width: `${Math.max(pieMetric === 'count' ? cat.percentage : cat.sizePercentage, 3)}%`,
                         backgroundColor: cat.color,
                       }}
                       className="h-full transition-opacity hover:opacity-85 focus:outline-none"
@@ -613,6 +946,7 @@ export function InspectorView({
                   Filtering by: <strong>{categoryFilter}</strong>
                 </span>
                 <button
+                  type="button"
                   onClick={() => setCategoryFilter('all')}
                   className="text-slate-400 hover:text-white"
                 >
@@ -772,10 +1106,36 @@ export function InspectorView({
             )}
           </div>
 
-          <div className="flex items-center justify-between sm:justify-end gap-3">
+          <div className="flex items-center justify-between sm:justify-end gap-3 flex-wrap">
             <span className="text-[11px] font-mono text-slate-400 tabular-nums">
               Showing <strong className="text-slate-200">{filteredNodes.length}</strong> of {nodes.length} nodes
             </span>
+
+            {/* Table vs Cards View Toggle */}
+            <div className="flex items-center rounded-lg bg-slate-950 border border-slate-800 p-0.5 text-xs">
+              <button
+                type="button"
+                onClick={() => setViewMode('table')}
+                title="Table view"
+                className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors ${
+                  viewMode === 'table' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <List className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Table</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('cards')}
+                title="Card grid view"
+                className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors ${
+                  viewMode === 'cards' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Cards</span>
+              </button>
+            </div>
 
             <div className="flex items-center rounded-lg bg-slate-950 border border-slate-800 p-0.5 text-xs">
               <button
@@ -815,85 +1175,188 @@ export function InspectorView({
         </div>
       </div>
 
-      {/* Nodes Table */}
-      <div className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-slate-800/80 bg-slate-950/40 text-xs font-medium text-slate-400">
-                <th className="py-3 px-3 w-8 text-center">
-                  <input
-                    type="checkbox"
-                    checked={filteredNodes.length > 0 && selectedNodeIds.size === filteredNodes.length}
-                    onChange={handleToggleSelectAll}
-                    className="rounded bg-slate-950 border-slate-700 text-indigo-600 focus:ring-0 cursor-pointer"
-                  />
-                </th>
-                <th className="py-3 px-3 w-12 text-center">State</th>
-                <th className="py-3 px-4">
-                  <button
-                    onClick={() => handleSort('name')}
-                    className="flex items-center gap-1.5 hover:text-white transition-colors"
-                  >
-                    <span>Node / Directory</span>
-                    {sortField === 'name' ? (
-                      sortAsc ? <ArrowUp className="w-3 h-3 text-indigo-400" /> : <ArrowDown className="w-3 h-3 text-indigo-400" />
-                    ) : (
-                      <ArrowUpDown className="w-3 h-3 opacity-40" />
-                    )}
-                  </button>
-                </th>
-                <th className="py-3 px-4">Git Repository</th>
-                <th className="py-3 px-4">Commit / Branch</th>
-                <th className="py-3 px-4">
-                  <button
-                    onClick={() => handleSort('health')}
-                    className="flex items-center gap-1.5 hover:text-white transition-colors"
-                  >
-                    <span>Health</span>
-                    {sortField === 'health' ? (
-                      sortAsc ? <ArrowUp className="w-3 h-3 text-indigo-400" /> : <ArrowDown className="w-3 h-3 text-indigo-400" />
-                    ) : (
-                      <ArrowUpDown className="w-3 h-3 opacity-40" />
-                    )}
-                  </button>
-                </th>
-                <th className="py-3 px-4">
-                  <button
-                    onClick={() => handleSort('size')}
-                    className="flex items-center gap-1.5 hover:text-white transition-colors"
-                  >
-                    <span>Size</span>
-                    {sortField === 'size' ? (
-                      sortAsc ? <ArrowUp className="w-3 h-3 text-indigo-400" /> : <ArrowDown className="w-3 h-3 text-indigo-400" />
-                    ) : (
-                      <ArrowUpDown className="w-3 h-3 opacity-40" />
-                    )}
-                  </button>
-                </th>
-                <th className="py-3 px-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/60 text-xs text-slate-300">
-              {sortedNodes.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-500">
-                    No custom nodes matched your criteria.
-                  </td>
-                </tr>
-              ) : (
-                sortedNodes.map((node) => {
-                  const displayName = showCleanNames
-                    ? aliases[node.folderName] || node.cleanDisplayName
-                    : node.folderName;
+      {/* Nodes List (Table or Cards, both support right-click Context Menu) */}
+      {viewMode === 'cards' ? (
+        sortedNodes.length === 0 ? (
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 py-12 text-center text-xs text-slate-500">
+            No custom nodes matched your criteria.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {sortedNodes.map((node) => {
+              const displayName = showCleanNames
+                ? aliases[node.folderName] || node.cleanDisplayName
+                : node.folderName;
+              const isContextTarget = contextMenu?.nodeId === node.id;
 
-                  return (
-                    <tr
-                      key={node.id}
-                      className={`hover:bg-slate-800/30 transition-colors ${
-                        !node.enabled ? 'opacity-60 bg-slate-950/20' : ''
-                      } ${selectedNodeIds.has(node.id) ? 'bg-indigo-950/20' : ''}`}
+              return (
+                <div
+                  key={node.id}
+                  onContextMenu={(e) => handleOpenContextMenu(e, node)}
+                  className={`rounded-xl border p-4 transition-colors cursor-context-menu flex flex-col justify-between gap-4 ${
+                    isContextTarget
+                      ? 'border-indigo-500 bg-indigo-950/30 shadow-lg'
+                      : 'border-slate-800 bg-slate-900/60 hover:border-slate-700'
+                  } ${!node.enabled ? 'opacity-65' : ''}`}
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="font-semibold text-sm text-slate-100 hover:text-indigo-300 cursor-pointer truncate"
+                            onClick={() => setDrawerNodeId(node.id)}
+                          >
+                            {displayName}
+                          </span>
+                          {node.hasUpdate && (
+                            <span className="text-[10px] font-mono text-amber-400 shrink-0">Update</span>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 font-mono mt-0.5">
+                          <span className="truncate max-w-[180px]">
+                            {node.folderName.replace(/\.disabled$/i, '')}
+                            {!node.enabled ? '.disabled' : ''}
+                          </span>
+                          <span aria-hidden="true">·</span>
+                          <span>@{node.author}</span>
+                          <span aria-hidden="true">·</span>
+                          <span className="text-indigo-400/90">{node.category}</span>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => onToggleNodeState(node.folderName)}
+                        title={node.enabled ? 'Click to disable' : 'Click to enable'}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                          node.enabled ? 'bg-indigo-600' : 'bg-slate-700'
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            node.enabled ? 'translate-x-4' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    <p className="text-xs text-slate-400 mt-3 line-clamp-2 leading-relaxed">
+                      {node.description || 'Custom node repository installed in custom_nodes/.'}
+                    </p>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-800/70 space-y-2 text-[11px] font-mono text-slate-400">
+                    <div className="flex items-center justify-between">
+                      <span>{node.currentCommit.slice(0, 7)}</span>
+                      <span className="tabular-nums text-slate-300">
+                        {node.sizeMb} MB ({totalDiskMb > 0 ? Math.round((node.sizeMb / totalDiskMb) * 100) : 0}%)
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-indigo-500 transition-all duration-300"
+                        style={{
+                          width: `${Math.max(Math.round(((node.sizeMb || 0) / maxRepoSizeMb) * 100), 4)}%`,
+                        }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] text-slate-500 font-sans">
+                      <span>{node.filesCount} files</span>
+                      <span>Right-click for actions</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )
+      ) : (
+        <div className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden shadow-sm">
+          <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800/70 bg-slate-950/30 text-[11px] text-slate-500">
+            <span>Right-click any node row for quick actions (Open in GitHub, View Readme, Force Reinstall, Toggle Visibility)</span>
+            <span className="font-mono tabular-nums">{sortedNodes.length} items</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-800/80 bg-slate-950/40 text-xs font-medium text-slate-400">
+                  <th className="py-3 px-3 w-8 text-center">
+                    <input
+                      type="checkbox"
+                      checked={filteredNodes.length > 0 && selectedNodeIds.size === filteredNodes.length}
+                      onChange={handleToggleSelectAll}
+                      className="rounded bg-slate-950 border-slate-700 text-indigo-600 focus:ring-0 cursor-pointer"
+                    />
+                  </th>
+                  <th className="py-3 px-3 w-12 text-center">State</th>
+                  <th className="py-3 px-4">
+                    <button
+                      onClick={() => handleSort('name')}
+                      className="flex items-center gap-1.5 hover:text-white transition-colors"
                     >
+                      <span>Node / Directory</span>
+                      {sortField === 'name' ? (
+                        sortAsc ? <ArrowUp className="w-3 h-3 text-indigo-400" /> : <ArrowDown className="w-3 h-3 text-indigo-400" />
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-40" />
+                      )}
+                    </button>
+                  </th>
+                  <th className="py-3 px-4">Git Repository</th>
+                  <th className="py-3 px-4">Commit / Branch</th>
+                  <th className="py-3 px-4">
+                    <button
+                      onClick={() => handleSort('health')}
+                      className="flex items-center gap-1.5 hover:text-white transition-colors"
+                    >
+                      <span>Health</span>
+                      {sortField === 'health' ? (
+                        sortAsc ? <ArrowUp className="w-3 h-3 text-indigo-400" /> : <ArrowDown className="w-3 h-3 text-indigo-400" />
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-40" />
+                      )}
+                    </button>
+                  </th>
+                  <th className="py-3 px-4">
+                    <button
+                      onClick={() => handleSort('size')}
+                      className="flex items-center gap-1.5 hover:text-white transition-colors"
+                    >
+                      <span>Size</span>
+                      {sortField === 'size' ? (
+                        sortAsc ? <ArrowUp className="w-3 h-3 text-indigo-400" /> : <ArrowDown className="w-3 h-3 text-indigo-400" />
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-40" />
+                      )}
+                    </button>
+                  </th>
+                  <th className="py-3 px-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60 text-xs text-slate-300">
+                {sortedNodes.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="py-12 text-center text-slate-500">
+                      No custom nodes matched your criteria.
+                    </td>
+                  </tr>
+                ) : (
+                  sortedNodes.map((node) => {
+                    const displayName = showCleanNames
+                      ? aliases[node.folderName] || node.cleanDisplayName
+                      : node.folderName;
+                    const isContextTarget = contextMenu?.nodeId === node.id;
+
+                    return (
+                      <tr
+                        key={node.id}
+                        onContextMenu={(e) => handleOpenContextMenu(e, node)}
+                        className={`hover:bg-slate-800/30 transition-colors cursor-context-menu ${
+                          !node.enabled ? 'opacity-60 bg-slate-950/20' : ''
+                        } ${selectedNodeIds.has(node.id) ? 'bg-indigo-950/20' : ''} ${
+                          isContextTarget ? 'bg-indigo-950/35 ring-1 ring-inset ring-indigo-500/60' : ''
+                        }`}
+                      >
                       {/* Row Checkbox */}
                       <td className="py-3.5 px-3 text-center">
                         <input
@@ -964,7 +1427,7 @@ export function InspectorView({
                           </div>
 
                           <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 font-mono mt-0.5">
-                            <span>{node.folderName}{!node.enabled ? '.disabled' : ''}</span>
+                            <span>{node.folderName.replace(/\.disabled$/i, '')}{!node.enabled ? '.disabled' : ''}</span>
                             <span aria-hidden="true">·</span>
                             <button
                               type="button"
@@ -1050,24 +1513,55 @@ export function InspectorView({
                         </button>
                       </td>
 
-                      {/* Size & Files */}
+                      {/* Size & Disk Progress Bar */}
                       <td className="py-3.5 px-4 font-mono tabular-nums text-slate-400">
-                        {node.sizeMb} MB
+                        <div className="w-28 space-y-1">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="text-slate-200">{node.sizeMb} MB</span>
+                            <span className="text-[10px] text-slate-500">
+                              {totalDiskMb > 0 ? Math.round(((node.sizeMb || 0) / totalDiskMb) * 100) : 0}%
+                            </span>
+                          </div>
+                          <div
+                            className="h-1.5 w-full rounded-full bg-slate-800 overflow-hidden"
+                            title={`${node.sizeMb} MB (${totalDiskMb > 0 ? Math.round(((node.sizeMb || 0) / totalDiskMb) * 100) : 0}% of custom_nodes/ disk usage)`}
+                          >
+                            <div
+                              className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-indigo-500 transition-all duration-300"
+                              style={{
+                                width: `${Math.max(Math.round(((node.sizeMb || 0) / maxRepoSizeMb) * 100), 4)}%`,
+                              }}
+                            />
+                          </div>
+                        </div>
                       </td>
 
                       {/* Actions */}
                       <td className="py-3.5 px-4 text-right">
                         <div className="flex items-center justify-end gap-2">
                           <button
-                            onClick={() =>
-                              onNavigateToRunner(
-                                `git -C custom_nodes/${node.folderName} pull && pip install -r requirements.txt`
-                              )
-                            }
-                            className="px-2 py-1 text-[11px] font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded transition-colors"
-                            title="Pull latest commit & run pip safely"
+                            disabled={updatingFolder === node.folderName}
+                            onClick={async () => {
+                              if (onUpdateSingleNode) {
+                                setUpdatingFolder(node.folderName);
+                                try {
+                                  const res = await onUpdateSingleNode(node.folderName);
+                                  if (res && 'message' in res && res.message) {
+                                    setMassActionMessage(res.message);
+                                  }
+                                } finally {
+                                  setUpdatingFolder(null);
+                                }
+                              } else {
+                                onNavigateToRunner(
+                                  `git -C custom_nodes/${node.folderName} pull && pip install -r custom_nodes/${node.folderName}/requirements.txt`
+                                );
+                              }
+                            }}
+                            className="px-2 py-1 text-[11px] font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 disabled:opacity-50 rounded transition-colors"
+                            title="Pull latest upstream commit on disk"
                           >
-                            Update
+                            {updatingFolder === node.folderName ? 'Updating...' : 'Update'}
                           </button>
 
                           <button
@@ -1087,6 +1581,211 @@ export function InspectorView({
           </table>
         </div>
       </div>
+      )}
+
+      {/* Right-Click Floating Context Menu */}
+      {contextMenu && contextMenuNode && (() => {
+        const githubHref = normalizeGitHubHref(contextMenuNode.gitUrl);
+        const displayTitle =
+          aliases[contextMenuNode.folderName] || contextMenuNode.cleanDisplayName;
+
+        return (
+          <div
+            ref={contextMenuRef}
+            role="menu"
+            aria-label={`Quick actions for ${displayTitle}`}
+            style={{ top: contextMenu.y, left: contextMenu.x }}
+            onContextMenu={(e) => e.preventDefault()}
+            className="fixed z-50 w-60 rounded-xl border border-slate-700/90 bg-[#0d121c]/95 backdrop-blur-md shadow-2xl py-1.5 text-xs text-slate-200 animate-fade-in"
+          >
+            <div className="px-3 py-2 border-b border-slate-800/80 mb-1">
+              <div className="font-semibold text-white truncate">{displayTitle}</div>
+              <div className="text-[10px] font-mono text-slate-400 truncate mt-0.5">
+                {contextMenuNode.folderName.replace(/\.disabled$/i, '')}
+                {!contextMenuNode.enabled ? '.disabled' : ''}
+              </div>
+            </div>
+
+            {githubHref ? (
+              <a
+                role="menuitem"
+                href={githubHref}
+                target="_blank"
+                rel="noreferrer"
+                onClick={() => setContextMenu(null)}
+                className="flex items-center justify-between gap-2.5 w-full px-3 py-2 text-left text-slate-200 hover:bg-indigo-600/20 hover:text-white transition-colors"
+              >
+                <span className="flex items-center gap-2.5">
+                  <ExternalLink className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                  <span>Open in GitHub</span>
+                </span>
+                <span className="text-[10px] text-slate-500 font-mono">repo</span>
+              </a>
+            ) : (
+              <div
+                role="menuitem"
+                aria-disabled="true"
+                className="flex items-center gap-2.5 w-full px-3 py-2 text-slate-500 cursor-not-allowed"
+              >
+                <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                <span>Open in GitHub (No URL)</span>
+              </div>
+            )}
+
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => handleViewReadme(contextMenuNode)}
+              className="flex items-center justify-between gap-2.5 w-full px-3 py-2 text-left text-slate-200 hover:bg-indigo-600/20 hover:text-white transition-colors"
+            >
+              <span className="flex items-center gap-2.5">
+                <FileText className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                <span>View Readme</span>
+              </span>
+              <span className="text-[10px] text-slate-500 font-mono">.md</span>
+            </button>
+
+            <button
+              type="button"
+              role="menuitem"
+              disabled={reinstallingFolder === contextMenuNode.folderName}
+              onClick={() => handleForceReinstall(contextMenuNode)}
+              className="flex items-center justify-between gap-2.5 w-full px-3 py-2 text-left text-slate-200 hover:bg-indigo-600/20 hover:text-white transition-colors disabled:opacity-50"
+            >
+              <span className="flex items-center gap-2.5">
+                <RefreshCw
+                  className={`w-3.5 h-3.5 text-amber-400 shrink-0 ${
+                    reinstallingFolder === contextMenuNode.folderName ? 'animate-spin' : ''
+                  }`}
+                />
+                <span>Force Reinstall</span>
+              </span>
+              <span className="text-[10px] text-slate-500 font-mono">git+pip</span>
+            </button>
+
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                onToggleNodeState(contextMenuNode.folderName);
+                setContextMenu(null);
+              }}
+              className="flex items-center justify-between gap-2.5 w-full px-3 py-2 text-left text-slate-200 hover:bg-indigo-600/20 hover:text-white transition-colors"
+            >
+              <span className="flex items-center gap-2.5">
+                {contextMenuNode.enabled ? (
+                  <EyeOff className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                ) : (
+                  <Eye className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                )}
+                <span>Toggle Visibility</span>
+              </span>
+              <span className="text-[10px] text-slate-500 font-mono">
+                {contextMenuNode.enabled ? 'hide' : 'show'}
+              </span>
+            </button>
+
+            <div className="my-1.5 border-t border-slate-800/80" />
+
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setDrawerNodeId(contextMenuNode.id);
+                setContextMenu(null);
+              }}
+              className="flex items-center gap-2.5 w-full px-3 py-2 text-left text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors"
+            >
+              <Info className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              <span>Inspect Node Details</span>
+            </button>
+
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                onUninstallNode(contextMenuNode.folderName);
+                setContextMenu(null);
+              }}
+              className="flex items-center gap-2.5 w-full px-3 py-2 text-left text-rose-400 hover:bg-rose-950/40 hover:text-rose-300 transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5 shrink-0" />
+              <span>Move to Trash</span>
+            </button>
+          </div>
+        );
+      })()}
+
+      {/* README Viewer Modal */}
+      {readmeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
+          <div className="w-full max-w-3xl max-h-[85vh] flex flex-col rounded-xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/60">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-cyan-400 shrink-0" />
+                  <h3 className="text-sm font-semibold text-white truncate">
+                    {aliases[readmeModal.node.folderName] || readmeModal.node.cleanDisplayName} · {readmeModal.fileName}
+                  </h3>
+                </div>
+                <p className="text-[11px] font-mono text-slate-400 mt-0.5 truncate">
+                  {readmeModal.source}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {!readmeModal.loading && readmeModal.content && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(readmeModal.content);
+                      setCopiedReadme(true);
+                      setTimeout(() => setCopiedReadme(false), 2000);
+                    }}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 transition-colors"
+                  >
+                    {copiedReadme ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
+                    <span>{copiedReadme ? 'Copied' : 'Copy'}</span>
+                  </button>
+                )}
+                {normalizeGitHubHref(readmeModal.node.gitUrl) && (
+                  <a
+                    href={normalizeGitHubHref(readmeModal.node.gitUrl) || '#'}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-xs text-indigo-300 transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>GitHub</span>
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setReadmeModal(null)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 overflow-y-auto flex-1 bg-slate-950/70">
+              {readmeModal.loading ? (
+                <div className="py-12 text-center text-xs font-mono text-slate-400">
+                  Loading README documentation...
+                </div>
+              ) : (
+                <pre className="whitespace-pre-wrap break-words font-mono text-xs text-slate-300 leading-relaxed">
+                  {readmeModal.content}
+                </pre>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Folder Normalizer Modal */}
       {showNormalizerModal && (
@@ -1108,7 +1807,7 @@ export function InspectorView({
             </div>
 
             <p className="text-xs text-slate-400 mt-3 leading-relaxed">
-              Detects non-standard directory naming (e.g. trailing <code>_plus</code>, mixed casing, missing <code>ComfyUI-</code> prefix) and standardizes them using safe atomic <code>std::fs::rename</code>.
+              Detects non-standard directory naming (e.g. trailing <code>_plus</code>, mixed casing, missing <code>ComfyUI-</code> prefix) and standardizes them via safe atomic filesystem directory rename.
             </p>
 
             <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950 overflow-hidden">

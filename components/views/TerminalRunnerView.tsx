@@ -13,12 +13,18 @@ import {
   Search,
   X,
 } from 'lucide-react';
-import { PipQueueItem, TerminalLogEntry } from '@/types';
+import { InstalledNode, PipQueueItem, TerminalLogEntry } from '@/types';
 import { streamExecReal } from '@/lib/system-client';
+import {
+  isTorchProtectedRequirement,
+  extractProtectedTorchPackages,
+  stripProtectedTorchPackages,
+} from '@/lib/torch-shield';
 
 interface TerminalRunnerViewProps {
   logs: TerminalLogEntry[];
   pipQueue: PipQueueItem[];
+  installedNodes?: InstalledNode[];
   onAddLog: (entry: Omit<TerminalLogEntry, 'id'>) => void;
   onClearLogs: () => void;
   onEnqueuePip: (nodeName: string, requirements: string[]) => void;
@@ -32,6 +38,7 @@ interface TerminalRunnerViewProps {
 export function TerminalRunnerView({
   logs,
   pipQueue,
+  installedNodes = [],
   onAddLog,
   onClearLogs,
   onEnqueuePip,
@@ -45,22 +52,26 @@ export function TerminalRunnerView({
   const [logFilterQuery, setLogFilterQuery] = useState('');
 
   const [isRunning, setIsRunning] = useState(false);
-  const [customReqInput, setCustomReqInput] = useState(
-    `# Sample requirements.txt with dangerous PyTorch override\ntransformers>=4.41.0\neinops\ntorch==2.1.2+cu121\ntorchvision>=0.16.2\nscipy>=1.11.0`
-  );
-  
-  // Derived state directly from pipQueue
-  const shieldActivePendingItem = pipQueue.find((item) => item.status === 'blocked_by_shield') || null;
+  const [selectedInstallNode, setSelectedInstallNode] = useState<string>('');
+  const [customReqInput, setCustomReqInput] = useState<string>('');
+  const [dryRunAnalysis, setDryRunAnalysis] = useState<{
+    flagged: string[];
+    safe: string[];
+  } | null>(null);
+
+  const shieldActivePendingItem =
+    pipQueue.find((item) => item.status === 'blocked_by_shield') || null;
   const terminalEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const displayedLogs = React.useMemo(() => {
     if (!logFilterQuery.trim()) return logs;
     const q = logFilterQuery.toLowerCase();
-    return logs.filter((l) => l.text.toLowerCase().includes(q) || l.type.toLowerCase().includes(q));
+    return logs.filter(
+      (l) => l.text.toLowerCase().includes(q) || l.type.toLowerCase().includes(q)
+    );
   }, [logs, logFilterQuery]);
 
-  // Auto-scroll logs
   useEffect(() => {
     terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [displayedLogs]);
@@ -122,13 +133,25 @@ export function TerminalRunnerView({
     }
   };
 
-  const handleTestRequirementsShield = () => {
-    const lines = customReqInput
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l && !l.startsWith('#'));
+  const parsedInputLines = React.useMemo(
+    () =>
+      customReqInput
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l && !l.startsWith('#')),
+    [customReqInput]
+  );
 
-    onEnqueuePip('Sandbox-Test-Node', lines);
+  const handleDryRunCheck = () => {
+    const flagged = extractProtectedTorchPackages(parsedInputLines);
+    const safe = stripProtectedTorchPackages(parsedInputLines);
+    setDryRunAnalysis({ flagged, safe });
+  };
+
+  const handleInstallRequirements = () => {
+    if (parsedInputLines.length === 0) return;
+    const label = selectedInstallNode || 'manual-requirements';
+    onEnqueuePip(label, parsedInputLines);
   };
 
   return (
@@ -141,12 +164,18 @@ export function TerminalRunnerView({
               Console &amp; Dependency Shield
             </h1>
             <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-2xl">
-              Strict FIFO sequential pip queue prevents site-packages corruption. The Torch Shield automatically intercepts and strips accidental PyTorch downgrades.
+              Strict FIFO sequential pip queue prevents site-packages corruption. The Torch Shield intercepts PyTorch, torchvision, torchaudio, and xformers overwrite attempts.
             </p>
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-950/40 border border-emerald-800/60 text-xs text-emerald-300">
+            <div
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs ${
+                autoTorchShield
+                  ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-300'
+                  : 'bg-amber-950/40 border-amber-800/60 text-amber-300'
+              }`}
+            >
               <ShieldCheck className="w-3.5 h-3.5" />
               <span>Torch Shield: {autoTorchShield ? 'Active' : 'Bypassed'}</span>
             </div>
@@ -156,7 +185,7 @@ export function TerminalRunnerView({
 
       {/* Emergency Torch Shield Modal / Callout if blocked */}
       {shieldActivePendingItem && (
-        <div className="rounded-xl border border-amber-500/50 bg-amber-950/30 p-5 shadow-lg animate-pulse">
+        <div className="rounded-xl border border-amber-500/50 bg-amber-950/30 p-5 shadow-lg">
           <div className="flex items-start gap-3">
             <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
             <div className="flex-1">
@@ -164,14 +193,14 @@ export function TerminalRunnerView({
                 Torch Shield Alert: PyTorch Overwrite Detected!
               </h3>
               <p className="text-xs text-amber-300/80 mt-1">
-                Node <strong>{shieldActivePendingItem.nodeName}</strong> contains requirements trying to install or downgrade:{' '}
+                Queue item <strong>{shieldActivePendingItem.nodeName}</strong> contains requirements trying to install or downgrade:{' '}
                 <code className="bg-amber-900/60 px-1.5 py-0.5 rounded font-mono text-amber-200">
                   {shieldActivePendingItem.strippedTorchPackages.join(', ')}
-                </code>.
-                Overwriting PyTorch in ComfyUI will break your CUDA acceleration and torch xformers runtime!
+                </code>
+                . Overwriting PyTorch in ComfyUI can break your CUDA acceleration runtime.
               </p>
 
-              {/* Split Before / After Diff */}
+              {/* Split Before / After Diff using exact boundary matcher */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3 text-xs font-mono">
                 <div className="p-3 rounded-lg bg-slate-950/90 border border-slate-800">
                   <div className="text-[10px] uppercase text-rose-400 font-bold mb-1">
@@ -179,13 +208,15 @@ export function TerminalRunnerView({
                   </div>
                   <div className="space-y-1">
                     {shieldActivePendingItem.requirements.map((req, i) => {
-                      const isRisky = shieldActivePendingItem.strippedTorchPackages.some((p) =>
-                        req.toLowerCase().startsWith(p)
-                      );
+                      const isRisky = isTorchProtectedRequirement(req);
                       return (
                         <div
                           key={i}
-                          className={isRisky ? 'text-rose-400 line-through bg-rose-950/40 px-1 rounded' : 'text-slate-400'}
+                          className={
+                            isRisky
+                              ? 'text-rose-400 line-through bg-rose-950/40 px-1 rounded'
+                              : 'text-slate-400'
+                          }
                         >
                           {req} {isRisky && '(Strip)'}
                         </div>
@@ -200,18 +231,13 @@ export function TerminalRunnerView({
                     <span>Sanitized pip install Target</span>
                   </div>
                   <div className="space-y-1">
-                    {shieldActivePendingItem.requirements
-                      .filter(
-                        (req) =>
-                          !shieldActivePendingItem.strippedTorchPackages.some((p) =>
-                            req.toLowerCase().startsWith(p)
-                          )
-                      )
-                      .map((req, i) => (
+                    {stripProtectedTorchPackages(shieldActivePendingItem.requirements).map(
+                      (req, i) => (
                         <div key={i} className="text-emerald-300 font-semibold">
                           ✓ {req}
                         </div>
-                      ))}
+                      )
+                    )}
                   </div>
                 </div>
               </div>
@@ -239,7 +265,6 @@ export function TerminalRunnerView({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Terminal Screen (2 cols) */}
         <div className="lg:col-span-2 flex flex-col rounded-xl border border-slate-800 bg-[#070a0f] overflow-hidden shadow-lg h-[540px]">
-          {/* Terminal Titlebar */}
           <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900/90 border-b border-slate-800">
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1.5">
@@ -248,12 +273,11 @@ export function TerminalRunnerView({
                 <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/80" />
               </div>
               <span className="text-xs font-mono text-slate-400 ml-2">
-                tokio::process::Command (PTY stdout)
+                Process Runner (NDJSON stdout/stderr stream)
               </span>
             </div>
 
             <div className="flex items-center gap-2">
-              {/* In-Terminal Search Filter */}
               <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-[11px] font-mono">
                 <Search className="w-3 h-3 text-slate-500" />
                 <input
@@ -283,7 +307,6 @@ export function TerminalRunnerView({
             </div>
           </div>
 
-          {/* Terminal Output Area */}
           <div className="flex-1 p-4 font-mono text-xs overflow-y-auto space-y-1.5 leading-relaxed selection:bg-indigo-500/30">
             {displayedLogs.map((log) => {
               let colorClass = 'text-slate-300';
@@ -306,12 +329,11 @@ export function TerminalRunnerView({
             <div ref={terminalEndRef} />
           </div>
 
-          {/* Terminal Command Input */}
           <div className="flex items-center gap-2 p-3 bg-slate-950 border-t border-slate-800/80">
             <span className="font-mono text-xs text-indigo-400 pl-1">$</span>
             <input
               type="text"
-              placeholder="Run command (e.g. pip install -r requirements.txt or git pull)..."
+              placeholder="Run command in ComfyUI root (e.g. git status or python main.py --help)..."
               value={commandInput}
               onChange={(e) => setCommandInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleRunCommand()}
@@ -341,7 +363,7 @@ export function TerminalRunnerView({
           </div>
         </div>
 
-        {/* Pip Queue & Torch Shield Sandbox (1 col) */}
+        {/* Pip Queue & Requirements Shield Inspector (1 col) */}
         <div className="flex flex-col gap-6">
           {/* Sequential Pip Queue */}
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 shadow-sm">
@@ -358,7 +380,7 @@ export function TerminalRunnerView({
             </div>
 
             <p className="text-[11px] text-slate-400 mt-2 leading-relaxed">
-              Enforces single-threaded pip execution to eliminate file lockup crashes on Windows and shared environments.
+              Executes one pip process at a time to eliminate site-packages file lock crashes.
             </p>
 
             <div className="mt-3 space-y-2 max-h-48 overflow-y-auto">
@@ -373,9 +395,7 @@ export function TerminalRunnerView({
                     className="flex items-center justify-between p-2.5 rounded-lg border border-slate-800 bg-slate-950 text-xs"
                   >
                     <div>
-                      <div className="font-semibold text-slate-200">
-                        {item.nodeName}
-                      </div>
+                      <div className="font-semibold text-slate-200">{item.nodeName}</div>
                       <div className="text-[10px] text-slate-500 font-mono">
                         {item.requirements.length} dependencies
                       </div>
@@ -383,9 +403,7 @@ export function TerminalRunnerView({
 
                     <div>
                       {item.status === 'queued' && (
-                        <span className="text-[10px] text-slate-400 font-mono">
-                          Queued
-                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono">Queued</span>
                       )}
                       {item.status === 'running' && (
                         <span className="text-[10px] text-indigo-400 font-mono animate-pulse">
@@ -398,9 +416,10 @@ export function TerminalRunnerView({
                         </span>
                       )}
                       {item.status === 'completed' && (
-                        <span className="text-[10px] text-emerald-400 font-mono">
-                          Done
-                        </span>
+                        <span className="text-[10px] text-emerald-400 font-mono">Done</span>
+                      )}
+                      {item.status === 'failed' && (
+                        <span className="text-[10px] text-rose-400 font-mono">Failed</span>
                       )}
                     </div>
                   </div>
@@ -409,33 +428,77 @@ export function TerminalRunnerView({
             </div>
           </div>
 
-          {/* Torch Shield Interactive Sandbox */}
-          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 shadow-sm">
-            <div className="flex items-center gap-2 pb-2">
+          {/* Requirements Inspector & Pip Installer */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 shadow-sm space-y-3">
+            <div className="flex items-center gap-2">
               <ShieldAlert className="w-4 h-4 text-emerald-400" />
               <h3 className="text-sm font-semibold text-white">
-                Torch Shield Sandbox
+                Shielded Pip Installer
               </h3>
             </div>
 
-            <p className="text-[11px] text-slate-400 mb-2 leading-relaxed">
-              Paste or edit sample <code>requirements.txt</code> below to test the automatic PyTorch protection interceptor:
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              Paste package specs or dry-run check lines with Torch Shield before queuing real <code>pip install</code>.
             </p>
+
+            {installedNodes.length > 0 && (
+              <select
+                value={selectedInstallNode}
+                onChange={(e) => setSelectedInstallNode(e.target.value)}
+                className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+              >
+                <option value="">Target label: manual-requirements</option>
+                {installedNodes.map((n) => (
+                  <option key={n.id} value={n.folderName}>
+                    {n.folderName}
+                  </option>
+                ))}
+              </select>
+            )}
 
             <textarea
               rows={4}
               value={customReqInput}
-              onChange={(e) => setCustomReqInput(e.target.value)}
+              onChange={(e) => {
+                setCustomReqInput(e.target.value);
+                setDryRunAnalysis(null);
+              }}
+              placeholder="e.g.&#10;einops>=0.7.0&#10;timm"
               className="w-full p-2.5 rounded-lg bg-slate-950 border border-slate-800 font-mono text-[11px] text-slate-200 focus:outline-none focus:border-indigo-500"
             />
 
-            <button
-              onClick={handleTestRequirementsShield}
-              className="w-full mt-3 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors"
-            >
-              <Flame className="w-3.5 h-3.5 text-amber-400" />
-              <span>Enqueue Pip Install Through Shield</span>
-            </button>
+            {dryRunAnalysis && (
+              <div className="p-2.5 rounded-lg border border-slate-800 bg-slate-950 text-[11px] font-mono space-y-1">
+                <div className={dryRunAnalysis.flagged.length > 0 ? 'text-amber-300' : 'text-emerald-400'}>
+                  {dryRunAnalysis.flagged.length > 0
+                    ? `Shield flagged ${dryRunAnalysis.flagged.length}: ${dryRunAnalysis.flagged.join(', ')}`
+                    : 'No protected torch packages detected.'}
+                </div>
+                <div className="text-slate-400">
+                  Safe packages: {dryRunAnalysis.safe.length}
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={handleDryRunCheck}
+                disabled={parsedInputLines.length === 0}
+                className="px-3 py-2 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 border border-slate-700 rounded-lg transition-colors"
+              >
+                Dry-Run Shield
+              </button>
+              <button
+                type="button"
+                onClick={handleInstallRequirements}
+                disabled={parsedInputLines.length === 0}
+                className="flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg transition-colors"
+              >
+                <Flame className="w-3.5 h-3.5 text-amber-300" />
+                <span>Pip Install</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>

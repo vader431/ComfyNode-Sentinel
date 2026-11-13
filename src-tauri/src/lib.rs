@@ -137,8 +137,8 @@ fn scan_custom_nodes(custom_nodes_path: String) -> Result<Vec<DiscoveredNode>, S
                 if let Ok(config) = fs::read_to_string(git_dir.join("config")) {
                     for line in config.lines() {
                         let trimmed = line.trim();
-                        if trimmed.starts_with("url = ") {
-                            git_url = trimmed.trim_start_matches("url = ").trim().to_string();
+                        if let Some(url) = trimmed.strip_prefix("url = ") {
+                            git_url = url.trim().to_string();
                             break;
                         }
                     }
@@ -147,7 +147,7 @@ fn scan_custom_nodes(custom_nodes_path: String) -> Result<Vec<DiscoveredNode>, S
                 if let Ok(head) = fs::read_to_string(git_dir.join("HEAD")) {
                     let head_trimmed = head.trim();
                     if let Some(ref_path) = head_trimmed.strip_prefix("ref: ") {
-                        branch = ref_path.split('/').last().unwrap_or("main").to_string();
+                        branch = ref_path.split('/').next_back().unwrap_or("main").to_string();
                         if let Ok(commit) = fs::read_to_string(git_dir.join(ref_path)) {
                             current_commit = commit.trim().to_string();
                         }

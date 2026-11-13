@@ -13,7 +13,7 @@ export function generateComfyLockfile(
   comfyuiVersion: string = 'v0.3.18-cu124'
 ): ComfyLockfile {
   const nodeEntries: LockfileNodeEntry[] = nodes.map((node) => ({
-    name: node.folderName,
+    name: node.folderName.replace(/\.disabled$/i, ''),
     url: node.gitUrl,
     commit_hash: node.currentCommit,
     branch: node.branch || 'main',
@@ -68,7 +68,7 @@ export function calculateReconciliation(
 
   for (const node of localNodes) {
     if (node.gitUrl) localMapByUrl.set(normalizeGitUrl(node.gitUrl), node);
-    localMapByName.set(node.folderName.toLowerCase(), node);
+    localMapByName.set(node.folderName.replace(/\.disabled$/i, '').toLowerCase(), node);
   }
 
   const items: ReconciliationItem[] = [];
@@ -77,7 +77,8 @@ export function calculateReconciliation(
   // Compare lockfile items against local
   for (const entry of lockfile.nodes) {
     const normalizedUrl = normalizeGitUrl(entry.url);
-    const localMatch = localMapByUrl.get(normalizedUrl) || localMapByName.get(entry.name.toLowerCase());
+    const entryBaseName = entry.name.replace(/\.disabled$/i, '').toLowerCase();
+    const localMatch = localMapByUrl.get(normalizedUrl) || localMapByName.get(entryBaseName);
 
     if (!localMatch) {
       // Missing locally -> Need to clone

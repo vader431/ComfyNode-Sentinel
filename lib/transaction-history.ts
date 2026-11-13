@@ -65,26 +65,3 @@ export function generateGitBisectScript(
   ].join('\n');
 }
 
-export const INITIAL_UPDATE_TRANSACTIONS: UpdateTransaction[] = [
-  {
-    id: 'tx-init-001',
-    nodeFolderName: 'comfyui_controlnet_aux_plus',
-    nodeDisplayName: 'ControlNet Aux Plus',
-    previousCommit: 'e8d1a42',
-    targetCommit: 'f93c011',
-    timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
-    status: 'applied',
-    rollbackCommand: 'git -C custom_nodes/comfyui_controlnet_aux_plus checkout e8d1a42',
-  },
-  {
-    id: 'tx-init-002',
-    nodeFolderName: 'ComfyUI-AnimateDiff-Evolved',
-    nodeDisplayName: 'AnimateDiff Evolved',
-    previousCommit: '4a1b82c',
-    targetCommit: '7e9d2f0',
-    timestamp: new Date(Date.now() - 3600000 * 24).toISOString(),
-    status: 'applied',
-    rollbackCommand: 'git -C custom_nodes/ComfyUI-AnimateDiff-Evolved checkout 4a1b82c',
-  },
-];
-

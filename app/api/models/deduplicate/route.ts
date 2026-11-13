@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
-import { resolveSafeSubpath } from '@/lib/server-fs';
+import { expandHomeDir, resolveSafeSubpath } from '@/lib/server-fs';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { comfyRoot, primaryRelativePath, duplicateRelativePaths } = body;
+    const rawRoot = typeof body.comfyRoot === 'string' ? body.comfyRoot : '';
+    const comfyRoot = expandHomeDir(rawRoot);
+    const { primaryRelativePath, duplicateRelativePaths } = body;
 
     if (!comfyRoot || !primaryRelativePath || !Array.isArray(duplicateRelativePaths)) {
       return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
@@ -43,4 +45,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-

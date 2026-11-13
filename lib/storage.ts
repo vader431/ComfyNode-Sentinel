@@ -1,5 +1,4 @@
 import {
-  RoadmapTask,
   InstalledNode,
   WorkspaceProfile,
   EnvironmentSettings,
@@ -8,14 +7,9 @@ import {
   TerminalLogEntry,
   UpdateTransaction,
 } from '@/types';
-import {
-  INITIAL_ROADMAP_TASKS,
-  INITIAL_PROFILES,
-  DEFAULT_SETTINGS,
-} from './default-data';
+import { DEFAULT_SETTINGS } from './default-data';
 
 const STORAGE_KEYS = {
-  TASKS: 'comfynode_tasks_v2',
   NODES: 'comfynode_installed_nodes_v2',
   TRASH: 'comfynode_trash_nodes_v2',
   PROFILES: 'comfynode_profiles_v2',
@@ -29,7 +23,6 @@ const STORAGE_KEYS = {
   ACTIVE_INSTANCE: 'comfynode_active_instance_v1',
 };
 
-// Safe LocalStorage accessor
 function getStoredItem<T>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback;
   try {
@@ -52,9 +45,6 @@ function setStoredItem<T>(key: string, value: T): void {
 }
 
 export const StorageService = {
-  getTasks: (): RoadmapTask[] => getStoredItem(STORAGE_KEYS.TASKS, INITIAL_ROADMAP_TASKS),
-  setTasks: (tasks: RoadmapTask[]): void => setStoredItem(STORAGE_KEYS.TASKS, tasks),
-
   getNodes: (): InstalledNode[] => {
     if (typeof window !== 'undefined') {
       localStorage.removeItem(STORAGE_KEYS.NODES);
@@ -62,7 +52,7 @@ export const StorageService = {
     return [];
   },
   setNodes: (_nodes: InstalledNode[]): void => {
-    // Real filesystem (custom_nodes/) is the source of truth; do not cache mock nodes in localStorage.
+    // Real filesystem (custom_nodes/) is the source of truth; do not cache nodes in localStorage.
   },
 
   getTrash: (): InstalledNode[] => {
@@ -75,50 +65,44 @@ export const StorageService = {
     // Real filesystem (.sentinel_trash/) is the source of truth.
   },
 
-  getProfiles: (): WorkspaceProfile[] => getStoredItem(STORAGE_KEYS.PROFILES, INITIAL_PROFILES),
+  getProfiles: (): WorkspaceProfile[] => getStoredItem(STORAGE_KEYS.PROFILES, []),
   setProfiles: (profiles: WorkspaceProfile[]): void => setStoredItem(STORAGE_KEYS.PROFILES, profiles),
 
-  getActiveProfileId: (): string => getStoredItem(STORAGE_KEYS.ACTIVE_PROFILE, 'profile-video'),
+  getActiveProfileId: (): string => getStoredItem(STORAGE_KEYS.ACTIVE_PROFILE, ''),
   setActiveProfileId: (id: string): void => setStoredItem(STORAGE_KEYS.ACTIVE_PROFILE, id),
 
   getSettings: (): EnvironmentSettings => getStoredItem(STORAGE_KEYS.SETTINGS, DEFAULT_SETTINGS),
   setSettings: (settings: EnvironmentSettings): void => setStoredItem(STORAGE_KEYS.SETTINGS, settings),
 
-  getAliases: (): Record<string, string> => {
-    const fallback: Record<string, string> = {
-      'comfyui_controlnet_aux_plus': 'ControlNet Preprocessors (Aux)',
-      'ComfyUI_IPAdapter_plus': 'IPAdapter Plus',
-      'comfyui-reactor-node': 'ReActor Face Swapper',
-    };
-    return getStoredItem(STORAGE_KEYS.ALIASES, fallback);
-  },
+  getAliases: (): Record<string, string> => getStoredItem(STORAGE_KEYS.ALIASES, {}),
   setAliases: (aliases: Record<string, string>): void => setStoredItem(STORAGE_KEYS.ALIASES, aliases),
 
-  getLogs: (): TerminalLogEntry[] => getStoredItem(STORAGE_KEYS.LOGS, [
-    {
-      id: 'init-log-1',
-      timestamp: '00:00:01',
-      type: 'info',
-      text: 'ComfyNode Sentinel initialized.',
-    },
-    {
-      id: 'init-log-2',
-      timestamp: '00:00:02',
-      type: 'shield',
-      text: 'Torch Shield activated: PyTorch overwrite protection active (Strict Mode).',
-    },
-  ]),
+  getLogs: (): TerminalLogEntry[] =>
+    getStoredItem(STORAGE_KEYS.LOGS, [
+      {
+        id: 'init-log-1',
+        timestamp: '00:00:00',
+        type: 'info',
+        text: 'ComfyNode Sentinel session started.',
+      },
+    ]),
   setLogs: (logs: TerminalLogEntry[]): void => {
-    // Keep at most 200 recent log lines to prevent localStorage exhaustion
     const capped = logs.length > 200 ? logs.slice(-200) : logs;
     setStoredItem(STORAGE_KEYS.LOGS, capped);
   },
 
-  getPipQueue: (): PipQueueItem[] => getStoredItem(STORAGE_KEYS.PIP_QUEUE, []),
+  getPipQueue: (): PipQueueItem[] => {
+    const raw = getStoredItem<PipQueueItem[]>(STORAGE_KEYS.PIP_QUEUE, []);
+    // If an app reload interrupted an active pip command, mark it as failed rather than stuck running
+    return raw.map((item) =>
+      item.status === 'running'
+        ? { ...item, status: 'failed' as const, finishedAt: item.finishedAt || new Date().toISOString() }
+        : item
+    );
+  },
   setPipQueue: (queue: PipQueueItem[]): void => setStoredItem(STORAGE_KEYS.PIP_QUEUE, queue),
 
-  getTransactions: (): UpdateTransaction[] =>
-    getStoredItem(STORAGE_KEYS.TRANSACTIONS, []),
+  getTransactions: (): UpdateTransaction[] => getStoredItem(STORAGE_KEYS.TRANSACTIONS, []),
   setTransactions: (txs: UpdateTransaction[]): void =>
     setStoredItem(STORAGE_KEYS.TRANSACTIONS, txs),
 
@@ -150,7 +134,6 @@ export const StorageService = {
 
   resetToDefaults: (): void => {
     if (typeof window === 'undefined') return;
-    localStorage.removeItem(STORAGE_KEYS.TASKS);
     localStorage.removeItem(STORAGE_KEYS.NODES);
     localStorage.removeItem(STORAGE_KEYS.TRASH);
     localStorage.removeItem(STORAGE_KEYS.PROFILES);

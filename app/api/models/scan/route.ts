@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { BaseModelFamily, ModelAsset, ModelCategory } from '@/types';
-import { computeFastFileFingerprint } from '@/lib/server-fs';
+import { computeFastFileFingerprint, expandHomeDir } from '@/lib/server-fs';
 
 const MODEL_EXTENSIONS = new Set(['.safetensors', '.ckpt', '.pt', '.pth', '.bin', '.gguf']);
 const CATEGORIES: ModelCategory[] = ['checkpoints', 'loras', 'controlnet', 'vae', 'upscale_models'];
@@ -20,7 +20,8 @@ function inferBaseModel(fileName: string, relPath: string): BaseModelFamily {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const comfyRoot = typeof body.comfyRoot === 'string' ? body.comfyRoot.trim() : '';
+    const rawRoot = typeof body.comfyRoot === 'string' ? body.comfyRoot : '';
+    const comfyRoot = expandHomeDir(rawRoot);
 
     if (!comfyRoot || !fs.existsSync(comfyRoot)) {
       return NextResponse.json({ models: [], error: 'ComfyUI root directory not found.' }, { status: 400 });
@@ -74,7 +75,9 @@ export async function POST(req: NextRequest) {
             const hash =
               !isSymlink && sizeBytes > 0
                 ? computeFastFileFingerprint(fullPath, sizeBytes)
-                : `symlink-${entry.name}`;
+                : isSymlink
+                  ? `symlink-${entry.name}`
+                  : '';
 
             scanned.push({
               id: `model-${Buffer.from(relPath).toString('base64').slice(0, 16)}`,
@@ -98,15 +101,15 @@ export async function POST(req: NextRequest) {
       walk(catDir, 0);
     }
 
-    // Mark duplicates
+    // Mark duplicates only for non-symlink, non-empty files with identical hashes
     const hashCounts = new Map<string, number>();
     for (const m of scanned) {
-      if (!m.isSymlink) {
+      if (!m.isSymlink && m.sizeBytes > 0 && m.hash) {
         hashCounts.set(m.hash, (hashCounts.get(m.hash) || 0) + 1);
       }
     }
     for (const m of scanned) {
-      if (!m.isSymlink && (hashCounts.get(m.hash) || 0) > 1) {
+      if (!m.isSymlink && m.sizeBytes > 0 && m.hash && (hashCounts.get(m.hash) || 0) > 1) {
         m.isDuplicate = true;
         m.duplicateGroupId = m.hash;
       }
@@ -120,4 +123,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-

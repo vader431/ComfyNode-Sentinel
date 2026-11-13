@@ -6,6 +6,9 @@ import { COMMUNITY_REGISTRY } from '@/lib/default-data';
 import { lintPythonNodeCode } from '@/lib/health-linter';
 import {
   collectPythonFiles,
+  expandHomeDir,
+  extractGitOwner,
+  extractNodeClassesFromPython,
   getFolderStats,
   readGitMetadata,
 } from '@/lib/server-fs';
@@ -52,15 +55,21 @@ function scanDirectoryAsNodes(
       }
     }
 
-    // Lint Python files for health issues
-    const pyFiles = collectPythonFiles(fullPath, 10);
+    // Lint Python files for health issues AND extract NODE_CLASS_MAPPINGS
+    const pyFiles = collectPythonFiles(fullPath, 20);
     const allIssues: HealthIssue[] = [];
+    const parsedNodeClasses = new Set<string>();
     let worstStatus: HealthStatus = 'compliant';
 
     for (const pyFile of pyFiles) {
       try {
         const code = fs.readFileSync(pyFile, 'utf-8');
         const relFile = path.relative(fullPath, pyFile).replace(/\\/g, '/');
+
+        for (const cls of extractNodeClassesFromPython(code)) {
+          parsedNodeClasses.add(cls);
+        }
+
         const lint = lintPythonNodeCode(code, relFile);
         if (lint.issues.length > 0) {
           allIssues.push(...lint.issues);
@@ -76,7 +85,7 @@ function scanDirectoryAsNodes(
     }
 
     // Match against known registry for extra metadata
-    const cleanUrl = gitUrl.replace(/\.git$/, '').toLowerCase();
+    const cleanUrl = gitUrl.replace(/\.git$/, '').replace(/^git@github\.com:/i, 'https://github.com/').toLowerCase();
     const regMatch = COMMUNITY_REGISTRY.find(
       (r) =>
         (cleanUrl && r.gitUrl.replace(/\.git$/, '').toLowerCase() === cleanUrl) ||
@@ -90,14 +99,14 @@ function scanDirectoryAsNodes(
       // ignore
     }
 
-    const authorFromUrl = gitUrl.includes('github.com/')
-      ? gitUrl.split('github.com/')[1]?.split('/')[0] || 'local'
-      : 'local';
+    const authorFromUrl = extractGitOwner(gitUrl);
 
     const proposedNorm =
       !cleanBase.startsWith('ComfyUI-') && cleanBase.toLowerCase() !== 'comfyui-manager'
         ? `ComfyUI-${cleanBase.replace(/^comfyui[-_]?/i, '')}`
         : undefined;
+
+    const extractedClasses = Array.from(parsedNodeClasses);
 
     nodes.push({
       id: `node-${cleanBase}`,
@@ -118,7 +127,8 @@ function scanDirectoryAsNodes(
       description:
         regMatch?.description ||
         (gitUrl ? `Git repository: ${gitUrl}` : `Local custom node directory (${folderName})`),
-      providesNodes: regMatch?.nodeClasses || [],
+      providesNodes:
+        extractedClasses.length > 0 ? extractedClasses : regMatch?.nodeClasses || [],
       normalizedProposedName: proposedNorm,
     });
   }
@@ -129,7 +139,8 @@ function scanDirectoryAsNodes(
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const comfyRoot = typeof body.comfyRoot === 'string' ? body.comfyRoot.trim() : '';
+    const rawRoot = typeof body.comfyRoot === 'string' ? body.comfyRoot : '';
+    const comfyRoot = expandHomeDir(rawRoot);
 
     if (!comfyRoot || !fs.existsSync(comfyRoot)) {
       return NextResponse.json(
@@ -163,4 +174,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-

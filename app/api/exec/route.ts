@@ -1,12 +1,14 @@
 import { NextRequest } from 'next/server';
 import { spawn } from 'child_process';
 import fs from 'fs';
+import { expandHomeDir } from '@/lib/server-fs';
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { command, comfyRoot, pythonBinary, pipPackages } = body;
+  const { command, pythonBinary, pipPackages } = body;
+  const expandedRoot = typeof body.comfyRoot === 'string' ? expandHomeDir(body.comfyRoot) : '';
 
-  const cwd = comfyRoot && fs.existsSync(comfyRoot) ? comfyRoot : process.cwd();
+  const cwd = expandedRoot && fs.existsSync(expandedRoot) ? expandedRoot : process.cwd();
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -21,7 +23,9 @@ export async function POST(req: NextRequest) {
 
       let child;
       if (Array.isArray(pipPackages) && pipPackages.length > 0) {
-        const py = pythonBinary || 'python';
+        const py = typeof pythonBinary === 'string' && pythonBinary.trim()
+          ? expandHomeDir(pythonBinary)
+          : 'python';
         const args = ['-m', 'pip', 'install', ...pipPackages];
         sendLine('info', `Executing: ${py} ${args.join(' ')}`);
         child = spawn(py, args, { cwd, shell: false });
@@ -91,4 +95,3 @@ export async function POST(req: NextRequest) {
     },
   });
 }
-

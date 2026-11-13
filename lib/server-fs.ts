@@ -21,7 +21,7 @@ export function resolveSafeSubpath(baseDir: string, ...segments: string[]): stri
 }
 
 /**
- * Validates a ComfyUI root directory on disk.
+ * Expands leading "~" to the current OS user's home directory.
  */
 export function expandHomeDir(inputPath: string): string {
   const trimmed = inputPath.trim();
@@ -34,18 +34,69 @@ export function expandHomeDir(inputPath: string): string {
   return trimmed;
 }
 
+/**
+ * Returns OS-appropriate candidate preset paths and probes which ones exist on disk.
+ */
+export function detectHostComfyCandidates(): {
+  platform: NodeJS.Platform;
+  arch: string;
+  presetPaths: string[];
+  detectedPaths: string[];
+} {
+  const home = os.homedir();
+  const isWin = process.platform === 'win32';
+  const presetPaths = isWin
+    ? [
+        'C:\\AI\\ComfyUI_windows_portable\\ComfyUI',
+        'C:\\ComfyUI',
+        'D:\\ComfyUI',
+        path.join(home, 'ComfyUI'),
+      ]
+    : [
+        path.join(home, 'ComfyUI'),
+        path.join(home, 'AI', 'ComfyUI'),
+        '/workspace/ComfyUI',
+        path.join(process.cwd(), 'ComfyUI'),
+      ];
+
+  const detectedPaths = presetPaths.filter((candidate) => {
+    try {
+      return (
+        fs.existsSync(candidate) &&
+        fs.existsSync(path.join(candidate, 'main.py')) &&
+        fs.existsSync(path.join(candidate, 'custom_nodes'))
+      );
+    } catch {
+      return false;
+    }
+  });
+
+  return {
+    platform: process.platform,
+    arch: process.arch,
+    presetPaths,
+    detectedPaths,
+  };
+}
+
 export async function validateComfyEnvironment(
   comfyRoot: string,
   requestedPython?: string
 ) {
   const trimmedRoot = expandHomeDir(comfyRoot);
+  const expandedRequestedPython = requestedPython ? expandHomeDir(requestedPython) : undefined;
+
   if (!trimmedRoot) {
     return {
       isValidRoot: false,
       hasMainPy: false,
       hasCustomNodes: false,
-      detectedPython: requestedPython || 'python',
+      resolvedRoot: '',
+      detectedPython: expandedRequestedPython || 'python',
       pythonVersion: '',
+      pythonType: 'system' as const,
+      platform: process.platform,
+      arch: process.arch,
       error: 'ComfyUI root path is empty.',
     };
   }
@@ -57,8 +108,8 @@ export async function validateComfyEnvironment(
 
   // Detect Python binary
   const candidates: { bin: string; type: 'windows_portable' | 'virtualenv' | 'system' }[] = [];
-  if (requestedPython && requestedPython.trim()) {
-    candidates.push({ bin: requestedPython.trim(), type: 'system' });
+  if (expandedRequestedPython) {
+    candidates.push({ bin: expandedRequestedPython, type: 'system' });
   }
 
   const parentDir = path.dirname(trimmedRoot);
@@ -68,16 +119,15 @@ export async function validateComfyEnvironment(
     { bin: path.join(trimmedRoot, '.venv', 'Scripts', 'python.exe'), type: 'virtualenv' },
     { bin: path.join(trimmedRoot, 'venv', 'bin', 'python'), type: 'virtualenv' },
     { bin: path.join(trimmedRoot, '.venv', 'bin', 'python'), type: 'virtualenv' },
-    { bin: 'python', type: 'system' },
-    { bin: 'python3', type: 'system' }
+    { bin: 'python3', type: 'system' },
+    { bin: 'python', type: 'system' }
   );
 
-  let detectedPython = requestedPython || 'python';
+  let detectedPython = expandedRequestedPython || 'python';
   let pythonVersion = '';
   let detectedType: 'windows_portable' | 'virtualenv' | 'system' | 'custom' = 'system';
 
   for (const cand of candidates) {
-    // For file paths, verify existence first
     if (cand.bin.includes(path.sep) || cand.bin.includes('/')) {
       if (!fs.existsSync(cand.bin)) continue;
     }
@@ -101,9 +151,12 @@ export async function validateComfyEnvironment(
     isValidRoot,
     hasMainPy,
     hasCustomNodes,
+    resolvedRoot: trimmedRoot,
     detectedPython,
     pythonVersion,
     pythonType: detectedType,
+    platform: process.platform,
+    arch: process.arch,
     error: isValidRoot
       ? undefined
       : !rootExists
@@ -153,10 +206,15 @@ export function getFolderStats(dirPath: string): { filesCount: number; sizeMb: n
 }
 
 /**
- * Collects up to maxFiles .py files inside a node directory.
+ * Collects up to maxFiles .py files inside a node directory (prioritizing root __init__.py).
  */
-export function collectPythonFiles(dirPath: string, maxFiles = 15): string[] {
+export function collectPythonFiles(dirPath: string, maxFiles = 20): string[] {
   const results: string[] = [];
+
+  const initPy = path.join(dirPath, '__init__.py');
+  if (fs.existsSync(initPy)) {
+    results.push(initPy);
+  }
 
   const walk = (current: string, depth: number) => {
     if (depth > 3 || results.length >= maxFiles) return;
@@ -174,7 +232,7 @@ export function collectPythonFiles(dirPath: string, maxFiles = 15): string[] {
       const full = path.join(current, entry.name);
       if (entry.isDirectory()) {
         walk(full, depth + 1);
-      } else if (entry.isFile() && entry.name.endsWith('.py')) {
+      } else if (entry.isFile() && entry.name.endsWith('.py') && full !== initPy) {
         results.push(full);
       }
     }
@@ -185,7 +243,58 @@ export function collectPythonFiles(dirPath: string, maxFiles = 15): string[] {
 }
 
 /**
- * Extracts git remote URL, branch, and short commit hash from .git/ directory.
+ * Parses NODE_CLASS_MAPPINGS dictionary keys and bracket assignments from Python node source.
+ */
+export function extractNodeClassesFromPython(code: string): string[] {
+  const classes = new Set<string>();
+
+  // Match NODE_CLASS_MAPPINGS = { "ClassName": ClassObj, ... }
+  const dictBlockRegex = /NODE_CLASS_MAPPINGS\s*(?::[^=]+)?=\s*\{([\s\S]*?)\}/g;
+  let blockMatch: RegExpExecArray | null;
+  while ((blockMatch = dictBlockRegex.exec(code)) !== null) {
+    const body = blockMatch[1];
+    const keyRegex = /['"]([A-Za-z0-9_.\-/ ]+)['"]\s*:/g;
+    let keyMatch: RegExpExecArray | null;
+    while ((keyMatch = keyRegex.exec(body)) !== null) {
+      classes.add(keyMatch[1]);
+    }
+  }
+
+  // Match NODE_CLASS_MAPPINGS["ClassName"] = ClassObj or .update({ ... })
+  const subscriptRegex = /NODE_CLASS_MAPPINGS\s*\[\s*['"]([A-Za-z0-9_.\-/ ]+)['"]\s*\]\s*=/g;
+  let subMatch: RegExpExecArray | null;
+  while ((subMatch = subscriptRegex.exec(code)) !== null) {
+    classes.add(subMatch[1]);
+  }
+
+  return Array.from(classes);
+}
+
+/**
+ * Extracts repository owner/author from HTTPS or SSH git URL.
+ */
+export function extractGitOwner(gitUrl: string): string {
+  const trimmed = (gitUrl || '').trim();
+  if (!trimmed) return 'local';
+
+  // SSH format: git@github.com:owner/repo.git
+  const sshMatch = trimmed.match(/^git@[^:]+:([^/]+)\//i);
+  if (sshMatch) return sshMatch[1];
+
+  // HTTPS/HTTP format: https://github.com/owner/repo.git
+  try {
+    const parsed = new URL(trimmed);
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    if (parts.length >= 2) return parts[0];
+  } catch {
+    // fallback below
+  }
+
+  return 'local';
+}
+
+/**
+ * Extracts git remote URL (preferring origin), branch, and short commit hash from .git/ directory.
  */
 export function readGitMetadata(nodePath: string): {
   gitUrl: string;
@@ -205,9 +314,15 @@ export function readGitMetadata(nodePath: string): {
     const configPath = path.join(gitDir, 'config');
     if (fs.existsSync(configPath)) {
       const config = fs.readFileSync(configPath, 'utf-8');
-      const match = config.match(/^\s*url\s*=\s*(.+)$/m);
-      if (match) {
-        gitUrl = match[1].trim();
+      const originSection = config.match(/\[remote\s+"origin"\]([\s\S]*?)(?=\n\[|$)/);
+      const originUrlMatch = originSection?.[1]?.match(/^\s*url\s*=\s*(.+)$/m);
+      if (originUrlMatch) {
+        gitUrl = originUrlMatch[1].trim();
+      } else {
+        const fallbackMatch = config.match(/^\s*url\s*=\s*(.+)$/m);
+        if (fallbackMatch) {
+          gitUrl = fallbackMatch[1].trim();
+        }
       }
     }
 
@@ -221,7 +336,6 @@ export function readGitMetadata(nodePath: string): {
         if (fs.existsSync(fullRefPath)) {
           currentCommit = fs.readFileSync(fullRefPath, 'utf-8').trim().slice(0, 7);
         } else {
-          // Check packed-refs
           const packedPath = path.join(gitDir, 'packed-refs');
           if (fs.existsSync(packedPath)) {
             const packed = fs.readFileSync(packedPath, 'utf-8');
@@ -270,4 +384,3 @@ export function computeFastFileFingerprint(filePath: string, sizeBytes: number):
 
   return hash.digest('hex').slice(0, 16);
 }
-

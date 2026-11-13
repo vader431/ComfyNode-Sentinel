@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   FileCode2,
   Download,
+  Upload,
   Copy,
   Check,
   RefreshCw,
@@ -48,6 +49,7 @@ export function LockfileView({
     };
   } | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
+  const lockfileInputRef = useRef<HTMLInputElement>(null);
 
   const currentLockfile = generateComfyLockfile(installedNodes);
   const lockfileString = JSON.stringify(currentLockfile, null, 2);
@@ -129,47 +131,25 @@ export function LockfileView({
     }
   };
 
-  const handleLoadSampleLockfile = () => {
-    const sample: ComfyLockfile = {
-      version: '1.0.0',
-      generated_at: new Date().toISOString(),
-      comfyui_version: 'v0.3.18-cu124',
-      nodes: [
-        {
-          name: 'ComfyUI-Manager',
-          url: 'https://github.com/ltdrdata/ComfyUI-Manager.git',
-          commit_hash: '9a4c8e1',
-          branch: 'main',
-          enabled_state: true,
-        },
-        {
-          name: 'ComfyUI-Impact-Pack',
-          url: 'https://github.com/ltdrdata/ComfyUI-Impact-Pack.git',
-          commit_hash: '11aa22bb', // Different commit -> checkout
-          branch: 'main',
-          enabled_state: true,
-        },
-        {
-          name: 'ComfyUI_IPAdapter_plus',
-          url: 'https://github.com/cubiq/ComfyUI_IPAdapter_plus.git',
-          commit_hash: '1b89ef3',
-          branch: 'main',
-          enabled_state: false, // State mismatch -> toggle to disabled
-        },
-        {
-          name: 'ComfyUI-SUPIR', // Missing locally -> clone
-          url: 'https://github.com/kijai/ComfyUI-SUPIR.git',
-          commit_hash: '77bb99aa',
-          branch: 'main',
-          enabled_state: true,
-        },
-      ],
-    };
-
-    setImportedJsonText(JSON.stringify(sample, null, 2));
-    const diff = calculateReconciliation(installedNodes, sample);
-    setReconciliationResult(diff);
+  const handleUploadLockfileFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
     setParseError(null);
+    try {
+      const text = await file.text();
+      setImportedJsonText(text);
+      const parsed = JSON.parse(text) as ComfyLockfile;
+      if (!parsed.nodes || !Array.isArray(parsed.nodes)) {
+        throw new Error('Uploaded file must contain a valid "nodes" array.');
+      }
+      const diff = calculateReconciliation(installedNodes, parsed);
+      setReconciliationResult(diff);
+    } catch (err: unknown) {
+      setParseError(err instanceof Error ? err.message : 'Invalid JSON lockfile format.');
+      setReconciliationResult(null);
+    } finally {
+      e.target.value = '';
+    }
   };
 
   return (
@@ -415,11 +395,20 @@ export function LockfileView({
               </div>
 
               <div className="flex items-center gap-2">
+                <input
+                  ref={lockfileInputRef}
+                  type="file"
+                  accept=".json"
+                  onChange={handleUploadLockfileFile}
+                  className="hidden"
+                />
                 <button
-                  onClick={handleLoadSampleLockfile}
-                  className="px-2.5 py-1 text-xs font-medium text-slate-400 hover:text-white bg-slate-800 rounded transition-colors"
+                  type="button"
+                  onClick={() => lockfileInputRef.current?.click()}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"
                 >
-                  Load Sample Lockfile
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Upload .json</span>
                 </button>
                 <button
                   onClick={handleRunDiff}
@@ -435,7 +424,7 @@ export function LockfileView({
             <textarea
               value={importedJsonText}
               onChange={(e) => setImportedJsonText(e.target.value)}
-              placeholder='Paste target comfy-lock.json here or click "Load Sample Lockfile"...'
+              placeholder='Paste target comfy-lock.json contents here or click "Upload .json"...'
               className="w-full h-44 mt-4 p-3 font-mono text-xs text-slate-300 bg-slate-950 border border-slate-800 rounded-lg resize-none focus:outline-none focus:border-indigo-500"
             />
 

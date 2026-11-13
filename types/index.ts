@@ -1,26 +1,3 @@
-export type PhaseId = 
-  | 'phase-0' 
-  | 'phase-1' 
-  | 'phase-2' 
-  | 'phase-3' 
-  | 'phase-4' 
-  | 'phase-5' 
-  | 'phase-6' 
-  | 'phase-7';
-
-export interface RoadmapTask {
-  id: string;
-  phaseId: PhaseId;
-  phaseTitle: string;
-  title: string;
-  description: string;
-  completed: boolean;
-  category: 'core' | 'rust' | 'frontend' | 'security' | 'sync' | 'packaging';
-  technicalDetails?: string;
-  githubLabels: string[];
-  linearPriority: 'Urgent' | 'High' | 'Medium' | 'Low';
-}
-
 export type HealthStatus = 'compliant' | 'fragile' | 'os_locked';
 
 export interface HealthIssue {

@@ -12,13 +12,15 @@ import {
   Download,
   Plus,
   ArrowRight,
+  Trash2,
+  FileCode2,
 } from 'lucide-react';
 import {
   WorkspaceProfile,
   InstalledNode,
   WorkflowInspectionResult,
 } from '@/types';
-import { extractWorkflowFromBuffer } from '@/lib/png-metadata';
+import { extractWorkflowFromBuffer, extractNodeTypesFromJson } from '@/lib/png-metadata';
 import { COMMUNITY_REGISTRY } from '@/lib/default-data';
 
 interface ProfilesViewProps {
@@ -27,6 +29,7 @@ interface ProfilesViewProps {
   installedNodes: InstalledNode[];
   onSwitchProfile: (profileId: string) => void;
   onCreateProfile: (name: string, description: string) => void;
+  onDeleteProfile?: (profileId: string) => void;
   onInstallMissingNodes: (missingClassNames: string[]) => void;
 }
 
@@ -36,6 +39,7 @@ export function ProfilesView({
   installedNodes,
   onSwitchProfile,
   onCreateProfile,
+  onDeleteProfile,
   onInstallMissingNodes,
 }: ProfilesViewProps) {
   const [activeTab, setActiveTab] = useState<'profiles' | 'preflight'>('preflight');
@@ -48,6 +52,8 @@ export function ProfilesView({
   const [inspectionResult, setInspectionResult] = useState<WorkflowInspectionResult | null>(null);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [pastedWorkflowJson, setPastedWorkflowJson] = useState('');
+  const [showJsonPaste, setShowJsonPaste] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const getProfileIcon = (iconName: string) => {
@@ -146,21 +152,20 @@ export function ProfilesView({
     });
   };
 
-  const handleLoadSampleWorkflow = () => {
+  const handleInspectPastedJson = () => {
+    setErrorMessage(null);
     setPreviewImageUrl(null);
-    const sampleClasses = [
-      'KSampler',
-      'CheckpointLoaderSimple',
-      'CLIPTextEncode',
-      'IPAdapterApply',
-      'DWPreprocessor',
-      'FaceDetailer',
-      'AnimateDiffLoaderWithContext',
-      'RgthreeContext',
-      'SUPIR_model_loader', // Missing!
-      'CrystoolsMonitor', // Missing!
-    ];
-    analyzeWorkflowClasses('flux_animatediff_portrait_workflow.json', 'json', sampleClasses);
+    try {
+      const parsed = JSON.parse(pastedWorkflowJson);
+      const classNames = extractNodeTypesFromJson(parsed);
+      if (classNames.length === 0) {
+        throw new Error('No ComfyUI node classes ("type" or "class_type") found in the pasted JSON.');
+      }
+      analyzeWorkflowClasses('pasted_workflow.json', 'json', classNames);
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : 'Invalid ComfyUI workflow JSON.');
+      setInspectionResult(null);
+    }
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -278,14 +283,50 @@ export function ProfilesView({
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  handleLoadSampleWorkflow();
+                  fileInputRef.current?.click();
                 }}
-                className="px-3 py-1.5 text-xs font-medium text-indigo-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors border border-slate-700"
+                className="px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors"
               >
-                Load Sample Workflow (AnimateDiff + Flux + Missing Nodes)
+                Choose .png or .json File
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowJsonPaste((prev) => !prev);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors border border-slate-700"
+              >
+                <FileCode2 className="w-3.5 h-3.5" />
+                <span>{showJsonPaste ? 'Hide JSON Paste' : 'Paste Workflow JSON'}</span>
               </button>
             </div>
           </div>
+
+          {showJsonPaste && (
+            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-white">
+                  Paste Raw ComfyUI Workflow / Prompt JSON
+                </span>
+                <button
+                  type="button"
+                  disabled={!pastedWorkflowJson.trim()}
+                  onClick={handleInspectPastedJson}
+                  className="px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 rounded-lg transition-colors"
+                >
+                  Inspect JSON Nodes
+                </button>
+              </div>
+              <textarea
+                rows={6}
+                value={pastedWorkflowJson}
+                onChange={(e) => setPastedWorkflowJson(e.target.value)}
+                placeholder='Paste exported workflow.json or prompt API JSON here...'
+                className="w-full p-3 font-mono text-xs text-slate-200 bg-slate-950 border border-slate-800 rounded-lg focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+          )}
 
           {errorMessage && (
             <div className="p-4 rounded-xl border border-rose-800/80 bg-rose-950/30 text-xs text-rose-300 flex items-center gap-2">
@@ -455,90 +496,112 @@ export function ProfilesView({
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {profiles.map((profile) => {
-              const isActive = profile.id === activeProfileId;
-              const IconComponent = getProfileIcon(profile.icon);
+          {profiles.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-800 bg-slate-900/40 p-10 text-center space-y-3">
+              <Sparkles className="w-7 h-7 text-indigo-400 mx-auto opacity-80" />
+              <div className="text-sm font-semibold text-white">No workspace profiles saved yet</div>
+              <p className="text-xs text-slate-400 max-w-md mx-auto">
+                Click &ldquo;Save Current Setup as Profile&rdquo; to snapshot your currently enabled custom nodes and toggle sets cleanly on disk.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {profiles.map((profile) => {
+                const isActive = profile.id === activeProfileId;
+                const IconComponent = getProfileIcon(profile.icon);
 
-              return (
-                <div
-                  key={profile.id}
-                  className={`flex flex-col justify-between rounded-xl border p-5 transition-all shadow-sm ${
-                    isActive
-                      ? 'border-indigo-500/80 bg-indigo-950/20'
-                      : 'border-slate-800 bg-slate-900/60 hover:border-slate-700'
-                  }`}
-                >
-                  <div>
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2.5">
-                        <div
-                          className={`p-2 rounded-lg ${
-                            isActive
-                              ? 'bg-indigo-600 text-white'
-                              : 'bg-slate-800 text-slate-400'
-                          }`}
-                        >
-                          <IconComponent className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <h3 className="text-sm font-semibold text-white">
-                            {profile.name}
-                          </h3>
-                          <div className="text-[11px] text-slate-500 font-mono mt-0.5">
-                            Updated: {profile.updatedAt}
+                return (
+                  <div
+                    key={profile.id}
+                    className={`flex flex-col justify-between rounded-xl border p-5 transition-all shadow-sm ${
+                      isActive
+                        ? 'border-indigo-500/80 bg-indigo-950/20'
+                        : 'border-slate-800 bg-slate-900/60 hover:border-slate-700'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2.5">
+                          <div
+                            className={`p-2 rounded-lg ${
+                              isActive
+                                ? 'bg-indigo-600 text-white'
+                                : 'bg-slate-800 text-slate-400'
+                            }`}
+                          >
+                            <IconComponent className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h3 className="text-sm font-semibold text-white">
+                              {profile.name}
+                            </h3>
+                            <div className="text-[11px] text-slate-500 font-mono mt-0.5">
+                              Updated: {profile.updatedAt}
+                            </div>
                           </div>
                         </div>
+
+                        <div className="flex items-center gap-2">
+                          {isActive && (
+                            <span className="text-[11px] font-mono font-semibold text-emerald-400 flex items-center gap-1">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Active</span>
+                            </span>
+                          )}
+                          {onDeleteProfile && (
+                            <button
+                              type="button"
+                              onClick={() => onDeleteProfile(profile.id)}
+                              title="Delete profile"
+                              className="p-1 text-slate-500 hover:text-rose-400 rounded hover:bg-slate-800 transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </div>
 
-                      {isActive && (
-                        <span className="text-[11px] font-mono font-semibold text-emerald-400 flex items-center gap-1">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Active</span>
+                      <p className="text-xs text-slate-400 mt-3 leading-relaxed">
+                        {profile.description}
+                      </p>
+
+                      <div className="mt-4 pt-3 border-t border-slate-800/60">
+                        <div className="text-[11px] text-slate-500 font-medium mb-1.5">
+                          Active Node Folders ({profile.targetNodeFolders.length}):
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {profile.targetNodeFolders.map((f) => (
+                            <span
+                              key={f}
+                              className="px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-[10px] font-mono text-slate-300"
+                            >
+                              {f}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-4 mt-4 border-t border-slate-800/80 flex justify-end">
+                      {isActive ? (
+                        <span className="text-xs text-slate-500 font-medium">
+                          Currently Applied
                         </span>
+                      ) : (
+                        <button
+                          onClick={() => onSwitchProfile(profile.id)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors border border-slate-700"
+                        >
+                          <span>Activate Profile</span>
+                          <ArrowRight className="w-3 h-3" />
+                        </button>
                       )}
                     </div>
-
-                    <p className="text-xs text-slate-400 mt-3 leading-relaxed">
-                      {profile.description}
-                    </p>
-
-                    <div className="mt-4 pt-3 border-t border-slate-800/60">
-                      <div className="text-[11px] text-slate-500 font-medium mb-1.5">
-                        Active Node Folders ({profile.targetNodeFolders.length}):
-                      </div>
-                      <div className="flex flex-wrap gap-1">
-                        {profile.targetNodeFolders.map((f) => (
-                          <span
-                            key={f}
-                            className="px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-[10px] font-mono text-slate-300"
-                          >
-                            {f}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
                   </div>
-
-                  <div className="pt-4 mt-4 border-t border-slate-800/80 flex justify-end">
-                    {isActive ? (
-                      <span className="text-xs text-slate-500 font-medium">
-                        Currently Applied
-                      </span>
-                    ) : (
-                      <button
-                        onClick={() => onSwitchProfile(profile.id)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors border border-slate-700"
-                      >
-                        <span>Activate Profile</span>
-                        <ArrowRight className="w-3 h-3" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

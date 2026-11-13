@@ -25,7 +25,7 @@ import {
   detectDependencyConflicts,
 } from '@/lib/conflict-detector';
 import { diffPipSnapshots, PipSnapshot } from '@/lib/pip-snapshot';
-import { SAMPLE_PYTHON_CODE_WITH_ISSUES, COMMUNITY_REGISTRY } from '@/lib/default-data';
+import { COMMUNITY_REGISTRY } from '@/lib/default-data';
 import { readNodeFileReal, patchNodeFileReal } from '@/lib/system-client';
 
 interface HealthDoctorViewProps {
@@ -61,13 +61,13 @@ export function HealthDoctorView({
   const [pipLatest, setPipLatest] = useState<PipSnapshot | null>(() => loadStoredSnapshot(PIP_LATEST_STORAGE_KEY));
   const [isCapturingPip, setIsCapturingPip] = useState(false);
   const [pipError, setPipError] = useState<string | null>(null);
-  const [selectedNodeId, setSelectedNodeId] = useState<string>('sample-sandbox');
+  const [selectedNodeId, setSelectedNodeId] = useState<string>(
+    () => installedNodes.find((n) => n.healthStatus !== 'compliant')?.id || installedNodes[0]?.id || ''
+  );
   const [activeRelativeFile, setActiveRelativeFile] = useState<string>('__init__.py');
   const [fileLoadError, setFileLoadError] = useState<string | null>(null);
   const [isLoadingFile, setIsLoadingFile] = useState<boolean>(false);
-  const [customPythonCode, setCustomPythonCode] = useState(
-    SAMPLE_PYTHON_CODE_WITH_ISSUES
-  );
+  const [customPythonCode, setCustomPythonCode] = useState<string>('');
   const [patchedToast, setPatchedToast] = useState(false);
   const [severityFilter, setSeverityFilter] = useState<'all' | 'critical' | 'warning'>('all');
 
@@ -76,7 +76,7 @@ export function HealthDoctorView({
     () =>
       lintPythonNodeCode(
         customPythonCode,
-        selectedNodeId === 'sample-sandbox' ? 'node_entry.py' : activeRelativeFile || `${selectedNodeId}.py`
+        activeRelativeFile || (selectedNodeId ? `${selectedNodeId}.py` : 'node.py')
       ),
     [customPythonCode, selectedNodeId, activeRelativeFile]
   );
@@ -116,9 +116,8 @@ export function HealthDoctorView({
   const handleSelectNode = async (nodeId: string) => {
     setSelectedNodeId(nodeId);
     setFileLoadError(null);
-    if (nodeId === 'sample-sandbox') {
-      setActiveRelativeFile('node_entry.py');
-      setCustomPythonCode(SAMPLE_PYTHON_CODE_WITH_ISSUES);
+    if (!nodeId) {
+      setCustomPythonCode('');
       return;
     }
 
@@ -148,7 +147,7 @@ export function HealthDoctorView({
     const { patchedCode } = autoPatchPythonCode(customPythonCode);
     setCustomPythonCode(patchedCode);
 
-    if (selectedNodeId !== 'sample-sandbox') {
+    if (selectedNodeId) {
       const node = installedNodes.find((n) => n.id === selectedNodeId);
       if (node) {
         const res = await patchNodeFileReal(comfyRoot, node.folderName, activeRelativeFile, patchedCode);
@@ -162,13 +161,15 @@ export function HealthDoctorView({
     setPatchedToast(true);
     setTimeout(() => setPatchedToast(false), 2500);
 
-    if (onPatchInstalledNode && selectedNodeId !== 'sample-sandbox') {
+    if (onPatchInstalledNode && selectedNodeId) {
       onPatchInstalledNode(selectedNodeId);
     }
   };
 
-  const handleResetSample = () => {
-    setCustomPythonCode(SAMPLE_PYTHON_CODE_WITH_ISSUES);
+  const handleReloadFile = () => {
+    if (selectedNodeId) {
+      void handleSelectNode(selectedNodeId);
+    }
   };
 
   return (
@@ -304,8 +305,10 @@ export function HealthDoctorView({
                   onChange={(e) => handleSelectNode(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
                 >
-                  <option value="sample-sandbox">
-                    Interactive Test Sandbox (DWPose Example)
+                  <option value="">
+                    {installedNodes.length > 0
+                      ? 'Select an installed custom node...'
+                      : 'No custom nodes scanned yet'}
                   </option>
                   {installedNodes.map((n) => (
                     <option key={n.id} value={n.id}>
@@ -383,9 +386,7 @@ export function HealthDoctorView({
                 <div className="flex items-center gap-2">
                   <FileCode className="w-4 h-4 text-indigo-400" />
                   <span className="text-xs font-mono text-slate-300">
-                    {selectedNodeId === 'sample-sandbox'
-                      ? 'sandbox_node.py (Editable)'
-                      : `${selectedNodeId}.py`}
+                    {selectedNodeId ? `${activeRelativeFile || `${selectedNodeId}.py`}` : 'Select a custom node or paste Python code'}
                   </span>
                 </div>
 
@@ -396,13 +397,13 @@ export function HealthDoctorView({
                       <span>Patched Successfully!</span>
                     </span>
                   )}
-                  {selectedNodeId === 'sample-sandbox' && (
+                  {selectedNodeId && (
                     <button
-                      onClick={handleResetSample}
+                      onClick={handleReloadFile}
                       className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-200 px-2 py-1 rounded hover:bg-slate-800 transition-colors"
                     >
                       <RotateCcw className="w-3 h-3" />
-                      <span>Reset Sample Code</span>
+                      <span>Reload File</span>
                     </button>
                   )}
                 </div>
