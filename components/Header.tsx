@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { SentinelLogo } from './SentinelLogo';
 import type { ComfyProcessStatus } from '@/lib/comfy-process';
+import type { ComfyInstance } from '@/types';
 import pkg from '../package.json';
 
 export type ActiveTab =
@@ -40,6 +41,10 @@ interface HeaderProps {
   onRestartComfyUI?: () => void;
   comfyProcessStatus?: ComfyProcessStatus;
   comfyProcessPid?: number | null;
+  comfyPort?: number;
+  instances?: ComfyInstance[];
+  activeInstanceId?: string;
+  onSwitchInstance?: (instanceId: string) => void;
   onToggleMobileMenu?: () => void;
   onToggleConsoleDrawer?: () => void;
   isConsoleDrawerOpen?: boolean;
@@ -57,6 +62,10 @@ export function Header({
   onRestartComfyUI,
   comfyProcessStatus = 'stopped',
   comfyProcessPid = null,
+  comfyPort = 8188,
+  instances = [],
+  activeInstanceId,
+  onSwitchInstance,
   onToggleMobileMenu,
   onToggleConsoleDrawer,
   isConsoleDrawerOpen,
@@ -95,8 +104,22 @@ export function Header({
           </button>
         </div>
 
-        {/* Right: Environment Pill, Rescan, Console Drawer, Torch Shield, Launch */}
+        {/* Right: Instance Switcher, Environment Pill, Rescan, Console Drawer, Torch Shield, Launch */}
         <div className="flex items-center gap-2 shrink-0">
+          {instances.length > 0 && onSwitchInstance && (
+            <select
+              value={activeInstanceId || instances[0]?.id || ''}
+              onChange={(e) => onSwitchInstance(e.target.value)}
+              title="Switch ComfyUI Instance"
+              className="hidden lg:block px-2.5 py-1 rounded-lg bg-slate-900/90 border border-slate-800 text-[11px] font-medium text-slate-200 focus:outline-none focus:border-indigo-500 max-w-[170px] truncate"
+            >
+              {instances.map((inst) => (
+                <option key={inst.id} value={inst.id}>
+                  {inst.name} (:{inst.port})
+                </option>
+              ))}
+            </select>
+          )}
           <button
             onClick={() => setActiveTab('settings')}
             title="Configure ComfyUI root directory"
@@ -178,12 +201,12 @@ export function Header({
                     }`}
                   />
                   <span className="hidden md:inline">
-                    {comfyProcessStatus === 'running' ? 'Running :8188' : 'Starting…'}
+                    {comfyProcessStatus === 'running' ? `Running :${comfyPort}` : 'Starting…'}
                   </span>
                 </span>
                 {comfyProcessStatus === 'running' && (
                   <a
-                    href="http://127.0.0.1:8188"
+                    href={`http://127.0.0.1:${comfyPort}`}
                     target="_blank"
                     rel="noreferrer"
                     title="Open ComfyUI in browser"

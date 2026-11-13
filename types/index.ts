@@ -151,6 +151,17 @@ export interface EnvironmentSettings {
   hasCustomNodes: boolean;
   showCleanNames: boolean;
   autoTorchShield: boolean;
+  comfyPort?: number;
+  minimizeToTray?: boolean;
+}
+
+export interface ComfyInstance {
+  id: string;
+  name: string;
+  comfyRoot: string;
+  pythonBinary: string;
+  pythonType: EnvironmentSettings['pythonType'];
+  port: number;
 }
 
 export interface DependencyRequirement {

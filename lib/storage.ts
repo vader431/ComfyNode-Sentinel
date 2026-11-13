@@ -3,6 +3,7 @@ import {
   InstalledNode,
   WorkspaceProfile,
   EnvironmentSettings,
+  ComfyInstance,
   PipQueueItem,
   TerminalLogEntry,
   UpdateTransaction,
@@ -24,6 +25,8 @@ const STORAGE_KEYS = {
   LOGS: 'comfynode_terminal_logs_v2',
   PIP_QUEUE: 'comfynode_pip_queue_v2',
   TRANSACTIONS: 'comfynode_transactions_v2',
+  INSTANCES: 'comfynode_instances_v1',
+  ACTIVE_INSTANCE: 'comfynode_active_instance_v1',
 };
 
 // Safe LocalStorage accessor
@@ -119,6 +122,32 @@ export const StorageService = {
   setTransactions: (txs: UpdateTransaction[]): void =>
     setStoredItem(STORAGE_KEYS.TRANSACTIONS, txs),
 
+  getInstances: (): ComfyInstance[] => {
+    const stored = getStoredItem<ComfyInstance[]>(STORAGE_KEYS.INSTANCES, []);
+    if (stored.length > 0) return stored;
+    const current = getStoredItem(STORAGE_KEYS.SETTINGS, DEFAULT_SETTINGS);
+    if (current.comfyRoot) {
+      return [
+        {
+          id: 'instance-default',
+          name: 'Default ComfyUI',
+          comfyRoot: current.comfyRoot,
+          pythonBinary: current.pythonBinary,
+          pythonType: current.pythonType,
+          port: current.comfyPort || 8188,
+        },
+      ];
+    }
+    return [];
+  },
+  setInstances: (instances: ComfyInstance[]): void =>
+    setStoredItem(STORAGE_KEYS.INSTANCES, instances),
+
+  getActiveInstanceId: (): string =>
+    getStoredItem(STORAGE_KEYS.ACTIVE_INSTANCE, 'instance-default'),
+  setActiveInstanceId: (id: string): void =>
+    setStoredItem(STORAGE_KEYS.ACTIVE_INSTANCE, id),
+
   resetToDefaults: (): void => {
     if (typeof window === 'undefined') return;
     localStorage.removeItem(STORAGE_KEYS.TASKS);
@@ -131,5 +160,7 @@ export const StorageService = {
     localStorage.removeItem(STORAGE_KEYS.LOGS);
     localStorage.removeItem(STORAGE_KEYS.PIP_QUEUE);
     localStorage.removeItem(STORAGE_KEYS.TRANSACTIONS);
+    localStorage.removeItem(STORAGE_KEYS.INSTANCES);
+    localStorage.removeItem(STORAGE_KEYS.ACTIVE_INSTANCE);
   },
 };

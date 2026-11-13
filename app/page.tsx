@@ -21,7 +21,7 @@ import {
   recordTransaction,
   rollbackTransaction,
 } from '@/lib/transaction-history';
-import { isTauriEnvironment } from '@/lib/tauri-bridge';
+import { isTauriEnvironment, nativeSetMinimizeToTray } from '@/lib/tauri-bridge';
 import {
   checkEnvironmentReal,
   scanNodesReal,
@@ -39,6 +39,7 @@ import {
   InstalledNode,
   WorkspaceProfile,
   EnvironmentSettings,
+  ComfyInstance,
   PipQueueItem,
   TerminalLogEntry,
   RegistryNode,
@@ -81,6 +82,8 @@ export default function Home() {
   const [activeProfileId, setActiveProfileId] = useState<string>(() => StorageService.getActiveProfileId());
   const [aliases, setAliases] = useState<Record<string, string>>(() => StorageService.getAliases());
   const [settings, setSettings] = useState<EnvironmentSettings>(() => StorageService.getSettings());
+  const [instances, setInstances] = useState<ComfyInstance[]>(() => StorageService.getInstances());
+  const [activeInstanceId, setActiveInstanceId] = useState<string>(() => StorageService.getActiveInstanceId());
   const [logs, setLogs] = useState<TerminalLogEntry[]>(() => StorageService.getLogs());
   const [pipQueue, setPipQueue] = useState<PipQueueItem[]>(() => StorageService.getPipQueue());
   const [transactions, setTransactions] = useState<UpdateTransaction[]>(() => StorageService.getTransactions());
@@ -187,6 +190,12 @@ export default function Home() {
       setIsScanning(false);
     }
   }, []);
+
+  // Sync minimize-to-tray preference with Tauri shell on startup
+  useEffect(() => {
+    if (!isClient) return;
+    void nativeSetMinimizeToTray(Boolean(settings.minimizeToTray));
+  }, [isClient, settings.minimizeToTray]);
 
   // Sync ComfyUI managed process status & tail logs
   useEffect(() => {
@@ -1013,7 +1022,31 @@ export default function Home() {
     pushToast('success', 'Filesystem scan complete', `Scanned ${settings.comfyRoot}`);
   };
 
+  const handleSaveInstances = (nextInstances: ComfyInstance[]) => {
+    setInstances(nextInstances);
+    StorageService.setInstances(nextInstances);
+  };
+
+  const handleSwitchInstance = async (instanceId: string) => {
+    const target = instances.find((i) => i.id === instanceId);
+    if (!target) return;
+    setActiveInstanceId(target.id);
+    StorageService.setActiveInstanceId(target.id);
+    const nextSettings: EnvironmentSettings = {
+      ...settings,
+      comfyRoot: target.comfyRoot,
+      pythonBinary: target.pythonBinary,
+      pythonType: target.pythonType,
+      comfyPort: target.port,
+    };
+    setSettings(nextSettings);
+    StorageService.setSettings(nextSettings);
+    pushToast('info', `Switched to ${target.name}`, `${target.comfyRoot} (:${target.port})`);
+    await performFullScan(target.comfyRoot, target.pythonBinary);
+  };
+
   const controlComfyProcess = async (action: 'start' | 'stop' | 'restart') => {
+    const port = settings.comfyPort || 8188;
     try {
       const res = await fetch('/api/comfy/process', {
         method: 'POST',
@@ -1022,7 +1055,7 @@ export default function Home() {
           action,
           comfyRoot: settings.comfyRoot,
           pythonBinary: settings.pythonBinary || 'python',
-          port: 8188,
+          port,
         }),
       });
       const data = await res.json();
@@ -1091,6 +1124,10 @@ export default function Home() {
         onRestartComfyUI={handleRestartComfyUI}
         comfyProcessStatus={comfyProcessStatus}
         comfyProcessPid={comfyProcessPid}
+        comfyPort={settings.comfyPort || 8188}
+        instances={instances}
+        activeInstanceId={activeInstanceId}
+        onSwitchInstance={handleSwitchInstance}
         onToggleMobileMenu={() => setIsMobileMenuOpen((prev) => !prev)}
         onToggleConsoleDrawer={() => setIsConsoleDrawerOpen((prev) => !prev)}
         isConsoleDrawerOpen={isConsoleDrawerOpen}
@@ -1246,7 +1283,11 @@ export default function Home() {
             {activeTab === 'settings' && (
               <SettingsView
                 settings={settings}
+                instances={instances}
+                activeInstanceId={activeInstanceId}
                 onUpdateSettings={handleUpdateSettings}
+                onSaveInstances={handleSaveInstances}
+                onSwitchInstance={handleSwitchInstance}
                 onResetAllData={handleResetAllData}
               />
             )}

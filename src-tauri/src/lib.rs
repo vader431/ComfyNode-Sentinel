@@ -3,11 +3,20 @@ use std::fs;
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::process::{Child, Command};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::Manager;
 
 struct StandaloneServer(Mutex<Option<Child>>);
+struct MinimizeToTrayState(AtomicBool);
+
+#[tauri::command]
+fn set_minimize_to_tray(state: tauri::State<'_, MinimizeToTrayState>, enabled: bool) {
+    state.0.store(enabled, Ordering::Relaxed);
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EnvironmentCheckResult {
@@ -166,8 +175,72 @@ fn scan_custom_nodes(custom_nodes_path: String) -> Result<Vec<DiscoveredNode>, S
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(StandaloneServer(Mutex::new(None)))
+        .manage(MinimizeToTrayState(AtomicBool::new(false)))
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let minimize = window
+                    .app_handle()
+                    .try_state::<MinimizeToTrayState>()
+                    .map(|s| s.0.load(Ordering::Relaxed))
+                    .unwrap_or(false);
+                if minimize {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .setup(|app| {
+            let show_i = MenuItem::with_id(app, "show", "Show ComfyNode Sentinel", true, None::<&str>)?;
+            let hide_i = MenuItem::with_id(app, "hide", "Hide to Tray", true, None::<&str>)?;
+            let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show_i, &hide_i, &quit_i])?;
+
+            let mut tray_builder = TrayIconBuilder::new()
+                .menu(&menu)
+                .tooltip("ComfyNode Sentinel")
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => {
+                        if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.show();
+                            let _ = win.set_focus();
+                        }
+                    }
+                    "hide" => {
+                        if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.hide();
+                        }
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(win) = app.get_webview_window("main") {
+                            if win.is_visible().unwrap_or(false) {
+                                let _ = win.hide();
+                            } else {
+                                let _ = win.show();
+                                let _ = win.set_focus();
+                            }
+                        }
+                    }
+                });
+
+            if let Some(icon) = app.default_window_icon() {
+                tray_builder = tray_builder.icon(icon.clone());
+            }
+            let _ = tray_builder.build(app)?;
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -238,7 +311,8 @@ pub fn run() {
             check_environment,
             toggle_node_state,
             quarantine_node_to_trash,
-            scan_custom_nodes
+            scan_custom_nodes,
+            set_minimize_to_tray
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

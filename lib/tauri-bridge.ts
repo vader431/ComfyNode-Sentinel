@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { check as checkTauriUpdate } from '@tauri-apps/plugin-updater';
+import { relaunch } from '@tauri-apps/plugin-process';
 
 /**
  * Returns true if running inside the Tauri v2 desktop webview shell.
@@ -9,6 +11,72 @@ export function isTauriEnvironment(): boolean {
     typeof window !== 'undefined' &&
     Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
   );
+}
+
+/**
+ * Enable or disable minimize-to-tray on window close (desktop only)
+ */
+export async function nativeSetMinimizeToTray(enabled: boolean): Promise<void> {
+  if (!isTauriEnvironment()) return;
+  try {
+    await invoke('set_minimize_to_tray', { enabled });
+  } catch (err) {
+    console.error('Tauri set_minimize_to_tray error:', err);
+  }
+}
+
+export interface AppUpdateStatus {
+  available: boolean;
+  version?: string;
+  notes?: string;
+  error?: string;
+  installAndRelaunch?: () => Promise<void>;
+}
+
+/**
+ * Check for app updates via Tauri updater plugin (falling back to GitHub Releases API)
+ */
+export async function nativeCheckAppUpdate(currentVersion: string): Promise<AppUpdateStatus> {
+  if (isTauriEnvironment()) {
+    try {
+      const update = await checkTauriUpdate();
+      if (update) {
+        return {
+          available: true,
+          version: update.version,
+          notes: update.body,
+          installAndRelaunch: async () => {
+            await update.downloadAndInstall();
+            await relaunch();
+          },
+        };
+      }
+      return { available: false, version: currentVersion };
+    } catch {
+      // Fallback to GitHub Releases API check if signing key / latest.json is not yet published
+    }
+  }
+
+  try {
+    const res = await fetch(
+      'https://api.github.com/repos/vader431/ComfyNode-Sentinel/releases/latest',
+      { headers: { Accept: 'application/vnd.github+json' } }
+    );
+    if (!res.ok) {
+      return { available: false, version: currentVersion };
+    }
+    const data = (await res.json()) as { tag_name?: string; body?: string };
+    const latest = (data.tag_name || '').replace(/^v/i, '');
+    if (latest && latest !== currentVersion) {
+      return { available: true, version: latest, notes: data.body };
+    }
+    return { available: false, version: currentVersion };
+  } catch (err) {
+    return {
+      available: false,
+      error: err instanceof Error ? err.message : 'Update check failed',
+    };
+  }
 }
 
 export interface NativeEnvironmentCheckResult {

@@ -77,16 +77,21 @@
 
 ### Distribution & Cross-Platform
 - [x] **Bundle Node.js as a Tauri Sidecar (`externalBin`)**: Eliminate the external `nodejs` system/`PATH` requirement in `src-tauri/src/lib.rs` so `.deb`, `.rpm`, `.AppImage`, and Windows installers work out of the box on clean machines.
-- [ ] **macOS Universal / Apple Silicon Builds**: Add `macos-latest` (`aarch64-apple-darwin` / `x86_64-apple-darwin`) to `.github/workflows/release.yml` for `.dmg` / `.app` bundles.
-- [ ] **In-App Auto-Updater (`tauri-plugin-updater`)**: Check GitHub/GitLab Releases for new versions and prompt for 1-click updates inside the desktop shell.
+- [x] **macOS Universal / Apple Silicon Builds**: Add `macos-latest` (`aarch64-apple-darwin` / `x86_64-apple-darwin`) to `.github/workflows/release.yml` for `.dmg` / `.app` bundles.
+- [x] **In-App Auto-Updater (`tauri-plugin-updater`)**: Check GitHub/GitLab Releases for new versions and prompt for 1-click updates inside the desktop shell.
 
 ### Desktop UX & Runtime Control
 - [x] **Native Folder & Binary Picker (`tauri-plugin-dialog`)**: Add a **Browse…** button to `OnboardingCard` and `SettingsView` for selecting the `ComfyUI` root directory and Python executable without typing paths.
 - [x] **Managed ComfyUI Process Lifecycle**: Track the launched ComfyUI process (PID, running status, port `8188` readiness, Stop/Restart controls in `Header`, and live ComfyUI stdout/stderr streaming in the Console drawer).
-- [ ] **System Tray & Minimize-to-Tray**: Keep Sentinel accessible from the OS tray while ComfyUI is running.
+- [x] **System Tray & Minimize-to-Tray**: Keep Sentinel accessible from the OS tray while ComfyUI is running.
 
 ### Ecosystem & Diagnostics
 - [x] **Live ComfyUI-Manager Registry Sync**: Fetch and cache upstream `custom-node-list.json` and `extension-node-map.json` so **Install & Browse** and **Missing Nodes** stay current without app releases.
 - [x] **Python `pip freeze` Snapshot & Drift Diff**: Record `pip list --format=json` snapshots before/after node installs to detect unexpected package upgrades or version drift.
 - [x] **End-to-End Integration / API Route Tests**: Add tests for `/api/environment`, `/api/nodes/scan`, `/api/nodes/action`, and `/api/models/scan` against temporary fixture directories.
+
+---
+
+## Phase 10: Multi-Instance ComfyUI Manager
+- [x] **Multi-Instance ComfyUI Manager**: Register, name, and switch between multiple ComfyUI installations (with per-instance root, Python binary, and server port) via `Header` quick-switcher and `SettingsView`.
 
