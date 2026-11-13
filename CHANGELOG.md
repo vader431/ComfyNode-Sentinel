@@ -5,6 +5,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [0.4.0] - 2026-11-13
+
+### Added
+- **Multi-Instance ComfyUI Manager**:
+  - Register, name, switch, and remove multiple ComfyUI installations (per-instance root, Python binary, and server port) via a Header quick-switcher and a Settings instance manager, with automatic migration from existing settings.
+  - Launch/status/Open UI controls now follow the per-instance port.
+- **System Tray & Minimize-to-Tray (Tauri v2)**:
+  - Tray icon with Show / Hide to Tray / Quit, left-click toggle, and a **Minimize to System Tray on Close** preference.
+- **In-App Update Check**:
+  - Added `tauri-plugin-updater` and `tauri-plugin-process` with a **Check Updates** control in Settings and a GitHub Releases API fallback.
+- **macOS CI Builds**:
+  - Added `aarch64-apple-darwin` and `x86_64-apple-darwin` targets to the GitHub release workflow.
+
+### Fixed
+- **GitLab CI**: Disabled updater artifact signing by default (`createUpdaterArtifacts: false`) so Linux packaging no longer fails without `TAURI_SIGNING_PRIVATE_KEY`.
+
+---
+
 ## [0.3.0] - 2026-11-13
 
 ### Added
