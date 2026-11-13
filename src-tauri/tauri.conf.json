@@ -39,6 +39,9 @@
     "linux": {
       "deb": {
         "depends": ["nodejs"]
+      },
+      "rpm": {
+        "depends": ["nodejs"]
       }
     },
     "android": {
