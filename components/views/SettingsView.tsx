@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import {
   FolderCheck,
+  FolderOpen,
   Cpu,
   CheckCircle2,
   XCircle,
@@ -13,6 +14,7 @@ import {
 } from 'lucide-react';
 import { EnvironmentSettings } from '@/types';
 import { checkEnvironmentReal } from '@/lib/system-client';
+import { isTauriEnvironment, nativePickDirectory, nativePickFile } from '@/lib/tauri-bridge';
 
 interface SettingsViewProps {
   settings: EnvironmentSettings;
@@ -124,13 +126,28 @@ export function SettingsView({
               <label className="block text-xs font-medium text-slate-300 mb-1">
                 Root Filesystem Path (Rust command: <code>validate_comfy_root</code>)
               </label>
-              <input
-                type="text"
-                required
-                value={comfyRootInput}
-                onChange={(e) => setComfyRootInput(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
-              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  required
+                  value={comfyRootInput}
+                  onChange={(e) => setComfyRootInput(e.target.value)}
+                  className="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
+                />
+                {isTauriEnvironment() && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const picked = await nativePickDirectory('Select ComfyUI Root Directory');
+                      if (picked) setComfyRootInput(picked);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors shrink-0"
+                  >
+                    <FolderOpen className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Browse…</span>
+                  </button>
+                )}
+              </div>
               <div className="flex flex-wrap items-center gap-4 mt-2 text-[11px] font-mono">
                 <span className={`flex items-center gap-1 ${settings.hasMainPy ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {settings.hasMainPy ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
@@ -215,13 +232,28 @@ export function SettingsView({
               <label className="block text-xs font-medium text-slate-300 mb-1">
                 Resolved Python Executable Path
               </label>
-              <input
-                type="text"
-                required
-                value={pythonBinaryInput}
-                onChange={(e) => setPythonBinaryInput(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
-              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  required
+                  value={pythonBinaryInput}
+                  onChange={(e) => setPythonBinaryInput(e.target.value)}
+                  className="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
+                />
+                {isTauriEnvironment() && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const picked = await nativePickFile('Select Python Executable');
+                      if (picked) setPythonBinaryInput(picked);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors shrink-0"
+                  >
+                    <FolderOpen className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Browse…</span>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 

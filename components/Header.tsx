@@ -10,8 +10,11 @@ import {
   AlertTriangle,
   Menu,
   Terminal,
+  Square,
+  ExternalLink,
 } from 'lucide-react';
 import { SentinelLogo } from './SentinelLogo';
+import type { ComfyProcessStatus } from '@/lib/comfy-process';
 import pkg from '../package.json';
 
 export type ActiveTab =
@@ -33,6 +36,10 @@ interface HeaderProps {
   isScanning?: boolean;
   onRefreshNodes?: () => void;
   onLaunchComfyUI?: () => void;
+  onStopComfyUI?: () => void;
+  onRestartComfyUI?: () => void;
+  comfyProcessStatus?: ComfyProcessStatus;
+  comfyProcessPid?: number | null;
   onToggleMobileMenu?: () => void;
   onToggleConsoleDrawer?: () => void;
   isConsoleDrawerOpen?: boolean;
@@ -46,6 +53,10 @@ export function Header({
   isScanning,
   onRefreshNodes,
   onLaunchComfyUI,
+  onStopComfyUI,
+  onRestartComfyUI,
+  comfyProcessStatus = 'stopped',
+  comfyProcessPid = null,
   onToggleMobileMenu,
   onToggleConsoleDrawer,
   isConsoleDrawerOpen,
@@ -151,15 +162,67 @@ export function Header({
           )}
 
           {onLaunchComfyUI && (
-            <button
-              onClick={onLaunchComfyUI}
-              disabled={!isValidRoot}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors shadow-sm whitespace-nowrap shrink-0"
-              title={isValidRoot ? 'Launch ComfyUI in Console' : 'Configure ComfyUI path in Settings first'}
-            >
-              <Play className="w-3.5 h-3.5 fill-current" />
-              <span className="hidden sm:inline">Launch ComfyUI</span>
-            </button>
+            comfyProcessStatus === 'running' || comfyProcessStatus === 'starting' ? (
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span
+                  title={comfyProcessPid ? `ComfyUI PID ${comfyProcessPid}` : 'ComfyUI Process'}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-mono rounded-lg border ${
+                    comfyProcessStatus === 'running'
+                      ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-300'
+                      : 'bg-amber-950/50 border-amber-500/40 text-amber-300'
+                  }`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      comfyProcessStatus === 'running' ? 'bg-emerald-400' : 'bg-amber-400 animate-ping'
+                    }`}
+                  />
+                  <span className="hidden md:inline">
+                    {comfyProcessStatus === 'running' ? 'Running :8188' : 'Starting…'}
+                  </span>
+                </span>
+                {comfyProcessStatus === 'running' && (
+                  <a
+                    href="http://127.0.0.1:8188"
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Open ComfyUI in browser"
+                    className="p-1.5 rounded-lg text-slate-300 hover:text-white bg-slate-900/60 hover:bg-slate-800 border border-slate-800 transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                )}
+                {onRestartComfyUI && (
+                  <button
+                    onClick={onRestartComfyUI}
+                    title="Restart ComfyUI"
+                    className="p-1.5 rounded-lg text-amber-300 hover:text-amber-200 bg-slate-900/60 hover:bg-slate-800 border border-slate-800 transition-colors"
+                  >
+                    <RotateCw className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                {onStopComfyUI && (
+                  <button
+                    onClick={onStopComfyUI}
+                    title="Stop ComfyUI"
+                    className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 rounded-lg transition-colors shadow-sm"
+                  >
+                    <Square className="w-3 h-3 fill-current" />
+                    <span className="hidden sm:inline">Stop</span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              <button
+                onClick={onLaunchComfyUI}
+                disabled={!isValidRoot}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors shadow-sm whitespace-nowrap shrink-0"
+                title={isValidRoot ? 'Launch Managed ComfyUI Process' : 'Configure ComfyUI path in Settings first'}
+              >
+                <Play className="w-3.5 h-3.5 fill-current" />
+                <span className="hidden sm:inline">Launch ComfyUI</span>
+              </button>
+            )
           )}
         </div>
       </div>

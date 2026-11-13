@@ -12,6 +12,8 @@ import {
   Layers,
   ShieldAlert,
   ArrowRight,
+  PackageCheck,
+  Camera,
 } from 'lucide-react';
 import { InstalledNode, RegistryNode } from '@/types';
 import {
@@ -22,23 +24,43 @@ import {
 import {
   detectDependencyConflicts,
 } from '@/lib/conflict-detector';
+import { diffPipSnapshots, PipSnapshot } from '@/lib/pip-snapshot';
 import { SAMPLE_PYTHON_CODE_WITH_ISSUES, COMMUNITY_REGISTRY } from '@/lib/default-data';
 import { readNodeFileReal, patchNodeFileReal } from '@/lib/system-client';
 
 interface HealthDoctorViewProps {
   installedNodes: InstalledNode[];
   comfyRoot: string;
+  pythonBinary?: string;
   scannedRequirementsMap?: Record<string, string[]>;
   onPatchInstalledNode?: (nodeId: string) => void;
+}
+
+const PIP_BASELINE_STORAGE_KEY = 'sentinel_pip_baseline';
+const PIP_LATEST_STORAGE_KEY = 'sentinel_pip_latest';
+
+function loadStoredSnapshot(key: string): PipSnapshot | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as PipSnapshot) : null;
+  } catch {
+    return null;
+  }
 }
 
 export function HealthDoctorView({
   installedNodes,
   comfyRoot,
+  pythonBinary = 'python',
   scannedRequirementsMap,
   onPatchInstalledNode,
 }: HealthDoctorViewProps) {
-  const [activeSubTab, setActiveSubTab] = useState<'linter' | 'conflict_matrix'>('linter');
+  const [activeSubTab, setActiveSubTab] = useState<'linter' | 'conflict_matrix' | 'pip_drift'>('linter');
+  const [pipBaseline, setPipBaseline] = useState<PipSnapshot | null>(() => loadStoredSnapshot(PIP_BASELINE_STORAGE_KEY));
+  const [pipLatest, setPipLatest] = useState<PipSnapshot | null>(() => loadStoredSnapshot(PIP_LATEST_STORAGE_KEY));
+  const [isCapturingPip, setIsCapturingPip] = useState(false);
+  const [pipError, setPipError] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string>('sample-sandbox');
   const [activeRelativeFile, setActiveRelativeFile] = useState<string>('__init__.py');
   const [fileLoadError, setFileLoadError] = useState<string | null>(null);
@@ -217,6 +239,18 @@ export function HealthDoctorView({
                 {detectedConflicts.length}
               </span>
             )}
+          </button>
+
+          <button
+            onClick={() => setActiveSubTab('pip_drift')}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+              activeSubTab === 'pip_drift'
+                ? 'bg-indigo-600 text-white'
+                : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
+            }`}
+          >
+            <PackageCheck className="w-3.5 h-3.5" />
+            <span>Pip Snapshot &amp; Drift</span>
           </button>
         </div>
       </div>
@@ -538,6 +572,170 @@ export function HealthDoctorView({
           </div>
         </div>
       )}
+
+      {/* VIEW 3: PYTHON PIP SNAPSHOT & DRIFT DIFF */}
+      {activeSubTab === 'pip_drift' && (() => {
+        const handleCapture = async (asBaseline: boolean) => {
+          setIsCapturingPip(true);
+          setPipError(null);
+          try {
+            const res = await fetch('/api/env/pip-snapshot', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ pythonBinary }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+              setPipError(data.error || 'Failed to capture pip snapshot');
+              return;
+            }
+            const snap: PipSnapshot = {
+              capturedAt: data.capturedAt,
+              pythonBinary: data.pythonBinary,
+              packages: data.packages,
+            };
+            if (asBaseline || !pipBaseline) {
+              setPipBaseline(snap);
+              window.localStorage.setItem(PIP_BASELINE_STORAGE_KEY, JSON.stringify(snap));
+            }
+            setPipLatest(snap);
+            window.localStorage.setItem(PIP_LATEST_STORAGE_KEY, JSON.stringify(snap));
+          } catch (err) {
+            setPipError(err instanceof Error ? err.message : 'Failed to capture pip snapshot');
+          } finally {
+            setIsCapturingPip(false);
+          }
+        };
+
+        const drift =
+          pipBaseline && pipLatest
+            ? diffPipSnapshots(pipBaseline.packages, pipLatest.packages)
+            : null;
+
+        return (
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 shadow-sm space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+              <div>
+                <h2 className="text-sm font-semibold text-white">
+                  Python Environment Snapshot &amp; Drift Diff
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Target runtime: <code className="font-mono text-slate-300">{pythonBinary}</code>
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => void handleCapture(true)}
+                  disabled={isCapturingPip}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 disabled:opacity-50 transition-colors"
+                >
+                  <Camera className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>{isCapturingPip ? 'Capturing…' : 'Set Baseline'}</span>
+                </button>
+                <button
+                  onClick={() => void handleCapture(false)}
+                  disabled={isCapturingPip}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 transition-colors"
+                >
+                  <PackageCheck className="w-3.5 h-3.5" />
+                  <span>{isCapturingPip ? 'Scanning…' : 'Compare Current'}</span>
+                </button>
+              </div>
+            </div>
+
+            {pipError && (
+              <div className="p-3 rounded-lg bg-rose-950/30 border border-rose-500/30 text-xs text-rose-300 font-mono">
+                {pipError}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              <div className="p-3.5 rounded-lg bg-slate-950/70 border border-slate-800">
+                <div className="text-slate-400 font-medium">Baseline Snapshot</div>
+                <div className="font-mono text-slate-200 mt-1">
+                  {pipBaseline
+                    ? `${Object.keys(pipBaseline.packages).length} packages · ${new Date(pipBaseline.capturedAt).toLocaleString()}`
+                    : 'Not captured yet'}
+                </div>
+              </div>
+              <div className="p-3.5 rounded-lg bg-slate-950/70 border border-slate-800">
+                <div className="text-slate-400 font-medium">Latest Snapshot</div>
+                <div className="font-mono text-slate-200 mt-1">
+                  {pipLatest
+                    ? `${Object.keys(pipLatest.packages).length} packages · ${new Date(pipLatest.capturedAt).toLocaleString()}`
+                    : 'Not captured yet'}
+                </div>
+              </div>
+            </div>
+
+            {drift && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-200">
+                    Detected Package Drift ({drift.totalChanges} change{drift.totalChanges === 1 ? '' : 's'})
+                  </span>
+                  <span className="font-mono text-slate-400">
+                    +{drift.added.length} added · ~{drift.changed.length} changed · -{drift.removed.length} removed
+                  </span>
+                </div>
+
+                {drift.totalChanges === 0 ? (
+                  <div className="p-6 text-center rounded-lg bg-emerald-950/15 border border-emerald-900/30 text-xs text-emerald-300">
+                    No package drift detected since baseline.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-800/80 rounded-lg border border-slate-800 bg-slate-950/60 overflow-hidden text-xs font-mono">
+                    {drift.changed.map((c) => (
+                      <div key={`chg-${c.name}`} className="px-3.5 py-2 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-amber-400 font-bold">~</span>
+                          <span className="text-slate-200">{c.name}</span>
+                          {c.isCritical && (
+                            <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 text-[10px] font-sans font-semibold">
+                              CRITICAL
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-slate-400">
+                          {c.from} <span className="text-amber-400">→</span> <span className="text-slate-100">{c.to}</span>
+                        </span>
+                      </div>
+                    ))}
+                    {drift.added.map((a) => (
+                      <div key={`add-${a.name}`} className="px-3.5 py-2 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-emerald-400 font-bold">+</span>
+                          <span className="text-slate-200">{a.name}</span>
+                          {a.isCritical && (
+                            <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 text-[10px] font-sans font-semibold">
+                              CRITICAL
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-emerald-300">{a.version}</span>
+                      </div>
+                    ))}
+                    {drift.removed.map((r) => (
+                      <div key={`rem-${r.name}`} className="px-3.5 py-2 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-rose-400 font-bold">-</span>
+                          <span className="text-slate-200">{r.name}</span>
+                          {r.isCritical && (
+                            <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 text-[10px] font-sans font-semibold">
+                              CRITICAL
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-rose-300">{r.version}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }

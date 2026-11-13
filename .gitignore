@@ -7,4 +7,5 @@ coverage/
 .env*
 !.env.example
 src-tauri/standalone-server/
+src-tauri/binaries/
 src-tauri/target/

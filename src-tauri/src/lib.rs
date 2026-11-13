@@ -165,6 +165,7 @@ fn scan_custom_nodes(custom_nodes_path: String) -> Result<Vec<DiscoveredNode>, S
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(StandaloneServer(Mutex::new(None)))
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -184,7 +185,15 @@ pub fn run() {
                     let server_dir = resource_dir.join("standalone-server");
                     let server_js = server_dir.join("server.js");
                     if server_js.exists() {
-                        let mut cmd = Command::new("node");
+                        let bundled_node = std::env::current_exe()
+                            .ok()
+                            .and_then(|exe| exe.parent().map(|p| p.join(if cfg!(windows) { "node.exe" } else { "node" })))
+                            .filter(|p| p.exists());
+
+                        let mut cmd = match bundled_node {
+                            Some(ref bin) => Command::new(bin),
+                            None => Command::new("node"),
+                        };
                         cmd.arg(&server_js)
                             .current_dir(&server_dir)
                             .env("PORT", port.to_string())

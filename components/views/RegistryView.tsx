@@ -69,7 +69,9 @@ export function RegistryView({
   const [installingId, setInstallingId] = useState<string | null>(null);
   const [updatingFolder, setUpdatingFolder] = useState<string | null>(null);
   const [lastCheckedAt, setLastCheckedAt] = useState<string | null>(null);
-  const [busyAction, setBusyAction] = useState<'url' | 'batch' | 'check' | 'update' | null>(null);
+  const [busyAction, setBusyAction] = useState<'url' | 'batch' | 'check' | 'update' | 'sync' | null>(null);
+  const [syncedNodes, setSyncedNodes] = useState<RegistryNode[]>([]);
+  const [syncedAt, setSyncedAt] = useState<string | null>(null);
   const [statusBanner, setStatusBanner] = useState<{ ok: boolean; message: string } | null>(null);
 
   // Direct Git URL modal state
@@ -92,7 +94,39 @@ export function RegistryView({
     );
   };
 
-  const filteredRegistry = COMMUNITY_REGISTRY.filter((node) => {
+  React.useEffect(() => {
+    let cancelled = false;
+    fetch('/api/registry/sync')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled && data && Array.isArray(data.nodes)) {
+          setSyncedNodes(data.nodes);
+          setSyncedAt(data.syncedAt || null);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const combinedRegistry = React.useMemo(() => {
+    if (syncedNodes.length === 0) return COMMUNITY_REGISTRY;
+    const seen = new Set(
+      COMMUNITY_REGISTRY.map((n) => n.gitUrl.replace(/\.git$/i, '').toLowerCase())
+    );
+    const merged = [...COMMUNITY_REGISTRY];
+    for (const node of syncedNodes) {
+      const key = node.gitUrl.replace(/\.git$/i, '').toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        merged.push(node);
+      }
+    }
+    return merged;
+  }, [syncedNodes]);
+
+  const filteredRegistry = combinedRegistry.filter((node) => {
     if (selectedCategory !== 'all' && node.category !== selectedCategory) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -104,6 +138,35 @@ export function RegistryView({
     }
     return true;
   });
+
+  const handleSyncRegistry = async () => {
+    setBusyAction('sync');
+    setStatusBanner(null);
+    try {
+      const res = await fetch('/api/registry/sync', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        setStatusBanner({
+          ok: false,
+          message: data.error || 'Failed to sync ComfyUI-Manager registry.',
+        });
+        return;
+      }
+      setSyncedNodes(Array.isArray(data.nodes) ? data.nodes : []);
+      setSyncedAt(data.syncedAt || new Date().toISOString());
+      setStatusBanner({
+        ok: true,
+        message: `Synced ${data.count ?? 0} community nodes from ComfyUI-Manager.`,
+      });
+    } catch (err) {
+      setStatusBanner({
+        ok: false,
+        message: err instanceof Error ? err.message : 'Registry sync failed.',
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  };
 
   const handleInstallCard = async (node: RegistryNode) => {
     setInstallingId(node.id);
@@ -213,6 +276,16 @@ export function RegistryView({
           <div className="flex flex-wrap items-center gap-3">
             {mode === 'browse' ? (
               <>
+                <button
+                  onClick={handleSyncRegistry}
+                  disabled={busyAction !== null}
+                  title={syncedAt ? `Last synced: ${new Date(syncedAt).toLocaleString()}` : 'Fetch latest ComfyUI-Manager registry'}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-indigo-200 bg-indigo-950/50 hover:bg-indigo-900/60 disabled:opacity-50 border border-indigo-700/60 rounded-lg transition-colors"
+                >
+                  <RotateCw className={`w-3.5 h-3.5 ${busyAction === 'sync' ? 'animate-spin' : ''}`} />
+                  <span>{busyAction === 'sync' ? 'Syncing…' : syncedNodes.length > 0 ? `Synced (${combinedRegistry.length})` : 'Sync Registry'}</span>
+                </button>
+
                 <button
                   onClick={() => setShowUrlModal(true)}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors"

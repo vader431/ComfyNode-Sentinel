@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
 
 /**
  * Returns true if running inside the Tauri v2 desktop webview shell.
@@ -28,8 +29,40 @@ export interface NativeDiscoveredNode {
 }
 
 /**
- * Native environment validation using Rust fs checks
+ * Native OS directory picker (desktop only)
  */
+export async function nativePickDirectory(title = 'Select ComfyUI Folder'): Promise<string | null> {
+  if (!isTauriEnvironment()) return null;
+  try {
+    const selected = await openDialog({
+      directory: true,
+      multiple: false,
+      title,
+    });
+    return typeof selected === 'string' ? selected : null;
+  } catch (err) {
+    console.error('Tauri directory dialog error:', err);
+    return null;
+  }
+}
+
+/**
+ * Native OS file picker (desktop only)
+ */
+export async function nativePickFile(title = 'Select Python Executable'): Promise<string | null> {
+  if (!isTauriEnvironment()) return null;
+  try {
+    const selected = await openDialog({
+      directory: false,
+      multiple: false,
+      title,
+    });
+    return typeof selected === 'string' ? selected : null;
+  } catch (err) {
+    console.error('Tauri file dialog error:', err);
+    return null;
+  }
+}
 export async function nativeCheckEnvironment(
   comfyRoot: string
 ): Promise<NativeEnvironmentCheckResult | null> {

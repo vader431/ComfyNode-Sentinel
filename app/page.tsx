@@ -86,6 +86,9 @@ export default function Home() {
   const [transactions, setTransactions] = useState<UpdateTransaction[]>(() => StorageService.getTransactions());
   const [scannedRequirementsMap, setScannedRequirementsMap] = useState<Record<string, string[]>>({});
   const [setupBannerDismissed, setSetupBannerDismissed] = useState(false);
+  const [comfyProcessStatus, setComfyProcessStatus] = useState<'stopped' | 'starting' | 'running' | 'error'>('stopped');
+  const [comfyProcessPid, setComfyProcessPid] = useState<number | null>(null);
+  const comfyLastLogIdRef = React.useRef<number>(0);
 
   const addLog = (entry: Omit<TerminalLogEntry, 'id'>) => {
     const newEntry: TerminalLogEntry = {
@@ -184,6 +187,46 @@ export default function Home() {
       setIsScanning(false);
     }
   }, []);
+
+  // Sync ComfyUI managed process status & tail logs
+  useEffect(() => {
+    if (!isClient) return;
+    let cancelled = false;
+
+    const pollProcess = async () => {
+      try {
+        const res = await fetch(`/api/comfy/process?since=${comfyLastLogIdRef.current}`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        setComfyProcessStatus(data.status || 'stopped');
+        setComfyProcessPid(data.pid ?? null);
+        if (Array.isArray(data.logs) && data.logs.length > 0) {
+          for (const l of data.logs) {
+            addLog({
+              timestamp: new Date(l.timestamp).toLocaleTimeString(),
+              type: l.stream,
+              text: l.text,
+            });
+          }
+          comfyLastLogIdRef.current = data.lastLogId || comfyLastLogIdRef.current;
+        }
+      } catch {
+        // ignore transient poll errors
+      }
+    };
+
+    void pollProcess();
+    if (comfyProcessStatus === 'starting' || comfyProcessStatus === 'running') {
+      const interval = setInterval(() => void pollProcess(), 2000);
+      return () => {
+        cancelled = true;
+        clearInterval(interval);
+      };
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [isClient, comfyProcessStatus]);
 
   // Live environment & custom_nodes scanner on startup
   useEffect(() => {
@@ -970,47 +1013,54 @@ export default function Home() {
     pushToast('success', 'Filesystem scan complete', `Scanned ${settings.comfyRoot}`);
   };
 
-  const handleLaunchComfyUI = async () => {
-    const pythonCmd = settings.pythonBinary || 'python';
-    const launchCommand = `${pythonCmd} main.py --listen 127.0.0.1 --port 8188`;
-
-    setTargetRunnerCommand(launchCommand);
-    setActiveTab('runner');
-
-    addLog({
-      timestamp: new Date().toLocaleTimeString(),
-      type: 'info',
-      text: `[ComfyUI Daemon] Starting ComfyUI in ${settings.comfyRoot}...`,
-    });
-    addLog({
-      timestamp: new Date().toLocaleTimeString(),
-      type: 'stdout',
-      text: `$ ${launchCommand}`,
-    });
-
+  const controlComfyProcess = async (action: 'start' | 'stop' | 'restart') => {
     try {
-      await streamExecReal(
-        {
-          command: launchCommand,
+      const res = await fetch('/api/comfy/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
           comfyRoot: settings.comfyRoot,
-          pythonBinary: settings.pythonBinary,
-        },
-        (line) => {
-          addLog({
-            timestamp: new Date().toLocaleTimeString(),
-            type: line.type,
-            text: line.text,
-          });
-        }
-      );
-    } catch (err) {
-      addLog({
-        timestamp: new Date().toLocaleTimeString(),
-        type: 'stderr',
-        text: err instanceof Error ? err.message : 'Failed to launch ComfyUI',
+          pythonBinary: settings.pythonBinary || 'python',
+          port: 8188,
+        }),
       });
+      const data = await res.json();
+      if (!res.ok) {
+        pushToast('error', 'ComfyUI Process Error', data.error || `Failed to ${action} ComfyUI`);
+        return;
+      }
+      setComfyProcessStatus(data.status || 'stopped');
+      setComfyProcessPid(data.pid ?? null);
+      if (Array.isArray(data.logs) && data.logs.length > 0) {
+        for (const l of data.logs) {
+          if (l.id > comfyLastLogIdRef.current) {
+            addLog({
+              timestamp: new Date(l.timestamp).toLocaleTimeString(),
+              type: l.stream,
+              text: l.text,
+            });
+          }
+        }
+        comfyLastLogIdRef.current = data.lastLogId || comfyLastLogIdRef.current;
+      }
+      if (action === 'start') {
+        setIsConsoleDrawerOpen(true);
+        pushToast('info', 'Launching ComfyUI', 'Starting managed ComfyUI process on port 8188…');
+      } else if (action === 'stop') {
+        pushToast('info', 'ComfyUI Stopped', 'Managed ComfyUI process terminated.');
+      } else {
+        setIsConsoleDrawerOpen(true);
+        pushToast('info', 'Restarting ComfyUI', 'Restarting managed ComfyUI process…');
+      }
+    } catch (err) {
+      pushToast('error', 'ComfyUI Process Error', err instanceof Error ? err.message : 'Request failed');
     }
   };
+
+  const handleLaunchComfyUI = () => void controlComfyProcess('start');
+  const handleStopComfyUI = () => void controlComfyProcess('stop');
+  const handleRestartComfyUI = () => void controlComfyProcess('restart');
 
   if (!isClient) {
     return (
@@ -1037,6 +1087,10 @@ export default function Home() {
         isScanning={isScanning}
         onRefreshNodes={handleRefreshNodes}
         onLaunchComfyUI={handleLaunchComfyUI}
+        onStopComfyUI={handleStopComfyUI}
+        onRestartComfyUI={handleRestartComfyUI}
+        comfyProcessStatus={comfyProcessStatus}
+        comfyProcessPid={comfyProcessPid}
         onToggleMobileMenu={() => setIsMobileMenuOpen((prev) => !prev)}
         onToggleConsoleDrawer={() => setIsConsoleDrawerOpen((prev) => !prev)}
         isConsoleDrawerOpen={isConsoleDrawerOpen}
@@ -1158,6 +1212,7 @@ export default function Home() {
               <HealthDoctorView
                 installedNodes={nodes}
                 comfyRoot={settings.comfyRoot}
+                pythonBinary={settings.pythonBinary}
                 scannedRequirementsMap={scannedRequirementsMap}
                 onPatchInstalledNode={handlePatchInstalledNode}
               />
