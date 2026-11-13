@@ -13,25 +13,33 @@ import {
   History,
   Undo2,
   Copy,
+  Loader2,
+  AlertTriangle,
 } from 'lucide-react';
 import { RegistryNode, InstalledNode, UpdateTransaction } from '@/types';
 import { COMMUNITY_REGISTRY } from '@/lib/default-data';
 import { generateGitBisectScript } from '@/lib/transaction-history';
 
+type ActionResult = { ok: boolean; message: string } | void;
+
 interface RegistryViewProps {
   installedNodes: InstalledNode[];
   transactions?: UpdateTransaction[];
-  onInstallFromRegistry: (regNode: RegistryNode) => void;
-  onInstallViaGitUrl: (url: string, branch?: string, folderName?: string) => void;
-  onBatchUrlImport: (urls: string[]) => void;
-  onCheckUpdates: () => void;
-  onUpdateAll: () => void;
+  isValidRoot?: boolean;
+  onNavigateToSettings?: () => void;
+  onInstallFromRegistry: (regNode: RegistryNode) => Promise<ActionResult> | ActionResult;
+  onInstallViaGitUrl: (url: string, branch?: string, folderName?: string) => Promise<ActionResult> | ActionResult;
+  onBatchUrlImport: (urls: string[]) => Promise<ActionResult> | ActionResult;
+  onCheckUpdates: () => Promise<ActionResult> | ActionResult;
+  onUpdateAll: () => Promise<ActionResult> | ActionResult;
   onRollbackTransaction?: (id: string) => void;
 }
 
 export function RegistryView({
   installedNodes,
   transactions = [],
+  isValidRoot = true,
+  onNavigateToSettings,
   onInstallFromRegistry,
   onInstallViaGitUrl,
   onBatchUrlImport,
@@ -45,6 +53,9 @@ export function RegistryView({
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [copiedBisectId, setCopiedBisectId] = useState<string | null>(null);
+  const [installingId, setInstallingId] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<'url' | 'batch' | 'check' | 'update' | null>(null);
+  const [statusBanner, setStatusBanner] = useState<{ ok: boolean; message: string } | null>(null);
 
   // Direct Git URL modal state
   const [directUrl, setDirectUrl] = useState('');
@@ -79,17 +90,39 @@ export function RegistryView({
     return true;
   });
 
-  const handleDirectSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!directUrl.trim()) return;
-    onInstallViaGitUrl(directUrl.trim(), directBranch.trim() || undefined, directFolder.trim() || undefined);
-    setDirectUrl('');
-    setDirectBranch('');
-    setDirectFolder('');
-    setShowUrlModal(false);
+  const handleInstallCard = async (node: RegistryNode) => {
+    setInstallingId(node.id);
+    setStatusBanner(null);
+    try {
+      const res = await onInstallFromRegistry(node);
+      if (res && typeof res === 'object') setStatusBanner(res);
+    } finally {
+      setInstallingId(null);
+    }
   };
 
-  const handleBatchSubmit = (e: React.FormEvent) => {
+  const handleDirectSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!directUrl.trim()) return;
+    setBusyAction('url');
+    setStatusBanner(null);
+    try {
+      const res = await onInstallViaGitUrl(
+        directUrl.trim(),
+        directBranch.trim() || undefined,
+        directFolder.trim() || undefined
+      );
+      if (res && typeof res === 'object') setStatusBanner(res);
+      setDirectUrl('');
+      setDirectBranch('');
+      setDirectFolder('');
+      setShowUrlModal(false);
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleBatchSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const urls = batchText
       .split('\n')
@@ -97,9 +130,38 @@ export function RegistryView({
       .filter((line) => line && !line.startsWith('#') && line.startsWith('http'));
 
     if (urls.length > 0) {
-      onBatchUrlImport(urls);
+      setBusyAction('batch');
+      setStatusBanner(null);
+      try {
+        const res = await onBatchUrlImport(urls);
+        if (res && typeof res === 'object') setStatusBanner(res);
+      } finally {
+        setBusyAction(null);
+      }
     }
     setShowBatchModal(false);
+  };
+
+  const handleCheckUpdatesClick = async () => {
+    setBusyAction('check');
+    setStatusBanner(null);
+    try {
+      const res = await onCheckUpdates();
+      if (res && typeof res === 'object') setStatusBanner(res);
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleUpdateAllClick = async () => {
+    setBusyAction('update');
+    setStatusBanner(null);
+    try {
+      const res = await onUpdateAll();
+      if (res && typeof res === 'object') setStatusBanner(res);
+    } finally {
+      setBusyAction(null);
+    }
   };
 
   return (
@@ -139,11 +201,12 @@ export function RegistryView({
             </button>
 
             <button
-              onClick={onCheckUpdates}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors"
+              onClick={handleCheckUpdatesClick}
+              disabled={busyAction !== null}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 border border-slate-700 rounded-lg transition-colors"
             >
-              <RotateCw className="w-3.5 h-3.5" />
-              <span>Check Updates</span>
+              <RotateCw className={`w-3.5 h-3.5 ${busyAction === 'check' ? 'animate-spin' : ''}`} />
+              <span>{busyAction === 'check' ? 'Checking...' : 'Check Updates'}</span>
             </button>
 
             <button
@@ -155,15 +218,51 @@ export function RegistryView({
             </button>
 
             <button
-              onClick={onUpdateAll}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors shadow-sm"
+              onClick={handleUpdateAllClick}
+              disabled={busyAction !== null}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-lg transition-colors shadow-sm"
             >
-              <RotateCw className="w-3.5 h-3.5" />
-              <span>Update All Installed</span>
+              <RotateCw className={`w-3.5 h-3.5 ${busyAction === 'update' ? 'animate-spin' : ''}`} />
+              <span>{busyAction === 'update' ? 'Updating...' : 'Update All Installed'}</span>
             </button>
           </div>
         </div>
       </div>
+
+      {!isValidRoot && (
+        <div className="rounded-xl border border-amber-700/60 bg-amber-950/30 px-4 py-3 flex items-center justify-between gap-3 text-xs text-amber-200">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>ComfyUI root directory is not configured on disk. Configure it in Settings before installing or updating nodes.</span>
+          </div>
+          {onNavigateToSettings && (
+            <button
+              onClick={onNavigateToSettings}
+              className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold shrink-0 transition-colors"
+            >
+              Open Settings
+            </button>
+          )}
+        </div>
+      )}
+
+      {statusBanner && (
+        <div
+          className={`rounded-xl border px-4 py-3 flex items-center justify-between gap-3 text-xs ${
+            statusBanner.ok
+              ? 'border-emerald-800/60 bg-emerald-950/30 text-emerald-200'
+              : 'border-rose-800/60 bg-rose-950/30 text-rose-200'
+          }`}
+        >
+          <span>{statusBanner.message}</span>
+          <button
+            onClick={() => setStatusBanner(null)}
+            className="text-xs opacity-70 hover:opacity-100"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Filter and Search Bar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
@@ -273,11 +372,21 @@ export function RegistryView({
                   </div>
                 ) : (
                   <button
-                    onClick={() => onInstallFromRegistry(node)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg shadow-sm transition-colors"
+                    onClick={() => handleInstallCard(node)}
+                    disabled={installingId !== null}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-lg shadow-sm transition-colors"
                   >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Install</span>
+                    {installingId === node.id ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Cloning...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Install</span>
+                      </>
+                    )}
                   </button>
                 )}
               </div>

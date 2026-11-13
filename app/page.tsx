@@ -439,21 +439,25 @@ export default function Home() {
   };
 
   // Registry Ingestion Handlers
-  const handleInstallFromRegistry = async (regNode: RegistryNode) => {
+  const handleInstallFromRegistry = async (regNode: RegistryNode): Promise<{ ok: boolean; message: string }> => {
+    if (!settings.isValidRoot) {
+      return { ok: false, message: 'ComfyUI root directory is not configured. Open Settings to set a valid ComfyUI path.' };
+    }
     addLog({
       timestamp: new Date().toLocaleTimeString(),
       type: 'info',
       text: `git clone --depth 1 ${regNode.gitUrl} custom_nodes/${regNode.name}`,
     });
 
-    const res = await cloneNodeReal(settings.comfyRoot, regNode.gitUrl, 'main', regNode.name);
+    const res = await cloneNodeReal(settings.comfyRoot, regNode.gitUrl, undefined, regNode.name);
     if (!res.success) {
+      const msg = res.error || 'Failed to clone repository';
       addLog({
         timestamp: new Date().toLocaleTimeString(),
         type: 'stderr',
-        text: `[Clone Error] ${res.error || 'Failed to clone repository'}`,
+        text: `[Clone Error] ${msg}`,
       });
-      return;
+      return { ok: false, message: msg };
     }
 
     addLog({
@@ -468,9 +472,16 @@ export default function Home() {
     if (reqs && reqs.length > 0) {
       handleEnqueuePip(regNode.name, reqs);
     }
+    return {
+      ok: true,
+      message: `Installed ${regNode.name}${reqs && reqs.length > 0 ? ` (${reqs.length} pip dependencies queued)` : ''}.`,
+    };
   };
 
-  const handleInstallViaGitUrl = async (url: string, branch?: string, folderName?: string) => {
+  const handleInstallViaGitUrl = async (url: string, branch?: string, folderName?: string): Promise<{ ok: boolean; message: string }> => {
+    if (!settings.isValidRoot) {
+      return { ok: false, message: 'ComfyUI root directory is not configured. Open Settings to set a valid ComfyUI path.' };
+    }
     const computedFolder =
       folderName || url.split('/').pop()?.replace('.git', '') || 'ComfyUI-Custom';
 
@@ -482,12 +493,13 @@ export default function Home() {
 
     const res = await cloneNodeReal(settings.comfyRoot, url, branch, computedFolder);
     if (!res.success) {
+      const msg = res.error || 'Failed to clone repository';
       addLog({
         timestamp: new Date().toLocaleTimeString(),
         type: 'stderr',
-        text: `[Clone Error] ${res.error || 'Failed to clone repository'}`,
+        text: `[Clone Error] ${msg}`,
       });
-      return;
+      return { ok: false, message: msg };
     }
 
     addLog({
@@ -501,9 +513,13 @@ export default function Home() {
     if (res.requirements && res.requirements.length > 0) {
       handleEnqueuePip(res.folderName || computedFolder, res.requirements);
     }
+    return { ok: true, message: `Cloned ${res.folderName || computedFolder} into custom_nodes/.` };
   };
 
-  const handleBatchUrlImport = async (urls: string[]) => {
+  const handleBatchUrlImport = async (urls: string[]): Promise<{ ok: boolean; message: string }> => {
+    if (!settings.isValidRoot) {
+      return { ok: false, message: 'ComfyUI root directory is not configured. Open Settings to set a valid ComfyUI path.' };
+    }
     addLog({
       timestamp: new Date().toLocaleTimeString(),
       type: 'info',
@@ -511,6 +527,7 @@ export default function Home() {
     });
 
     let addedCount = 0;
+    let errorCount = 0;
 
     for (const url of urls) {
       const exists = nodes.some((n) => n.gitUrl.toLowerCase() === url.toLowerCase());
@@ -528,6 +545,7 @@ export default function Home() {
           handleEnqueuePip(res.folderName || url, res.requirements);
         }
       } else {
+        errorCount++;
         addLog({
           timestamp: new Date().toLocaleTimeString(),
           type: 'stderr',
@@ -537,15 +555,20 @@ export default function Home() {
     }
 
     await performFullScan(settings.comfyRoot, settings.pythonBinary);
+    const summary = `Cloned ${addedCount} new custom node repository(s)${errorCount > 0 ? `, ${errorCount} failed (see Terminal)` : ''}.`;
     addLog({
       timestamp: new Date().toLocaleTimeString(),
-      type: 'success',
-      text: `[Batch URL Ingestion] Cloned ${addedCount} new custom node repositories.`,
+      type: errorCount > 0 ? 'warn' : 'success',
+      text: `[Batch URL Ingestion] ${summary}`,
     });
+    return { ok: errorCount === 0, message: summary };
   };
 
   // Updates
-  const handleCheckUpdates = async () => {
+  const handleCheckUpdates = async (): Promise<{ ok: boolean; message: string }> => {
+    if (!settings.isValidRoot) {
+      return { ok: false, message: 'ComfyUI root directory is not configured. Open Settings to set a valid ComfyUI path.' };
+    }
     addLog({
       timestamp: new Date().toLocaleTimeString(),
       type: 'info',
@@ -554,12 +577,13 @@ export default function Home() {
 
     const res = await checkUpdatesReal(settings.comfyRoot);
     if (res.error || !res.updates) {
+      const msg = res.error || 'Failed to query git remotes';
       addLog({
         timestamp: new Date().toLocaleTimeString(),
         type: 'stderr',
-        text: `[Update Check Error] ${res.error || 'Failed to query git remotes'}`,
+        text: `[Update Check Error] ${msg}`,
       });
-      return;
+      return { ok: false, message: msg };
     }
 
     const updateMap = new Map(res.updates.map((u) => [u.folderName, u]));
@@ -575,24 +599,30 @@ export default function Home() {
     updateNodes(updatedNodes);
 
     const available = res.updates.filter((u) => u.hasUpdate);
+    const msg = `Checked ${res.updates.length} git repositories. ${available.length} update(s) available${
+      available.length > 0 ? `: ${available.map((a) => a.folderName).join(', ')}` : '.'
+    }`;
     addLog({
       timestamp: new Date().toLocaleTimeString(),
       type: available.length > 0 ? 'warn' : 'success',
-      text: `Checked ${res.updates.length} git repositories. ${available.length} update(s) available${
-        available.length > 0 ? `: ${available.map((a) => a.folderName).join(', ')}` : '.'
-      }`,
+      text: msg,
     });
+    return { ok: true, message: msg };
   };
 
-  const handleUpdateAll = async () => {
+  const handleUpdateAll = async (): Promise<{ ok: boolean; message: string }> => {
+    if (!settings.isValidRoot) {
+      return { ok: false, message: 'ComfyUI root directory is not configured. Open Settings to set a valid ComfyUI path.' };
+    }
     const targets = nodes.filter((n) => n.hasUpdate);
     if (targets.length === 0) {
+      const msg = 'No pending updates flagged. Run "Check Updates" first.';
       addLog({
         timestamp: new Date().toLocaleTimeString(),
         type: 'info',
-        text: `[Batch Update] No pending updates flagged. Run "Check Updates" first.`,
+        text: `[Batch Update] ${msg}`,
       });
-      return;
+      return { ok: true, message: msg };
     }
 
     addLog({
@@ -602,9 +632,11 @@ export default function Home() {
     });
 
     let newTxList = [...transactions];
+    let updatedCount = 0;
     for (const n of targets) {
       const res = await updateNodeReal(settings.comfyRoot, n.folderName);
       if (res.success) {
+        updatedCount++;
         newTxList = recordTransaction(newTxList, {
           nodeFolderName: n.folderName,
           nodeDisplayName: n.cleanDisplayName,
@@ -628,6 +660,7 @@ export default function Home() {
     setTransactions(newTxList);
     StorageService.setTransactions(newTxList);
     await performFullScan(settings.comfyRoot, settings.pythonBinary);
+    return { ok: true, message: `Updated ${updatedCount} of ${targets.length} custom node(s).` };
   };
 
   const handleRollbackTransaction = async (txId: string) => {
@@ -971,6 +1004,8 @@ export default function Home() {
           <RegistryView
             installedNodes={nodes}
             transactions={transactions}
+            isValidRoot={settings.isValidRoot}
+            onNavigateToSettings={() => setActiveTab('settings')}
             onInstallFromRegistry={handleInstallFromRegistry}
             onInstallViaGitUrl={handleInstallViaGitUrl}
             onBatchUrlImport={handleBatchUrlImport}
