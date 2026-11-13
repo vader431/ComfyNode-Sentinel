@@ -508,64 +508,92 @@ export function RegistryView({
                 No custom nodes found in custom_nodes/. Configure your ComfyUI path in Settings or install a node first.
               </div>
             ) : (
-              <div className="divide-y divide-slate-800/70">
-                {installedNodes.map((n) => (
-                  <div
-                    key={n.id}
-                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3.5 hover:bg-slate-900/80"
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-semibold text-slate-100 font-mono truncate">
-                          {n.folderName}
-                        </span>
-                        {!n.enabled && (
-                          <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-mono text-slate-400">
-                            disabled
-                          </span>
-                        )}
-                        {n.hasUpdate ? (
-                          <span className="px-2 py-0.5 rounded-full bg-amber-950/70 border border-amber-700/60 text-[10px] font-mono text-amber-300">
-                            Update available
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-950/50 border border-emerald-800/50 text-[10px] font-mono text-emerald-400">
-                            Up to date
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-[11px] text-slate-500 font-mono mt-1 flex flex-wrap items-center gap-3">
-                        <span>Branch: {n.branch || 'unknown'}</span>
-                        <span>HEAD: {n.currentCommit || 'unknown'}</span>
-                        {n.latestCommit && n.hasUpdate && (
-                          <span className="text-amber-300">Upstream: {n.latestCommit}</span>
-                        )}
-                      </div>
-                    </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-800/80 bg-slate-950/50 text-[10px] uppercase tracking-wider text-slate-400 font-mono">
+                      <th className="py-2.5 px-5 font-semibold">Repository</th>
+                      <th className="py-2.5 px-4 font-semibold">Status</th>
+                      <th className="py-2.5 px-4 font-semibold">Branch / Commit</th>
+                      <th className="py-2.5 px-4 font-semibold">Last Updated</th>
+                      <th className="py-2.5 px-5 font-semibold text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/70">
+                    {installedNodes.map((n) => {
+                      const latestTx = transactions.find(
+                        (tx) => tx.nodeFolderName === n.folderName && tx.status === 'applied'
+                      );
+                      const lastUpdatedLabel = latestTx
+                        ? new Date(latestTx.timestamp).toLocaleDateString()
+                        : n.installedAt || '—';
 
-                    <div className="flex items-center gap-2 shrink-0">
-                      {n.hasUpdate && onUpdateSingleNode && (
-                        <button
-                          onClick={() => handleUpdateSingleClick(n.folderName)}
-                          disabled={updatingFolder !== null || busyAction !== null}
-                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-lg transition-colors"
-                        >
-                          {updatingFolder === n.folderName ? (
-                            <>
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              <span>Updating...</span>
-                            </>
-                          ) : (
-                            <>
-                              <Download className="w-3.5 h-3.5" />
-                              <span>Update</span>
-                            </>
-                          )}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                      return (
+                        <tr key={n.id} className="hover:bg-slate-900/80 transition-colors">
+                          <td className="py-3 px-5">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-semibold text-slate-100 font-mono truncate max-w-[240px]">
+                                {n.folderName}
+                              </span>
+                              {!n.enabled && (
+                                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-mono text-slate-400">
+                                  disabled
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            {n.hasUpdate ? (
+                              <span className="inline-flex px-2 py-0.5 rounded-full bg-amber-950/70 border border-amber-700/60 text-[10px] font-mono text-amber-300 whitespace-nowrap">
+                                Update available
+                              </span>
+                            ) : (
+                              <span className="inline-flex px-2 py-0.5 rounded-full bg-emerald-950/50 border border-emerald-800/50 text-[10px] font-mono text-emerald-400 whitespace-nowrap">
+                                Up to date
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-[11px] text-slate-400 font-mono">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span>{n.branch || 'unknown'}</span>
+                              <span className="text-slate-600">@</span>
+                              <span className="text-slate-300">{n.currentCommit || 'unknown'}</span>
+                              {n.latestCommit && n.hasUpdate && (
+                                <span className="text-amber-300">&rarr; {n.latestCommit}</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 text-[11px] text-slate-400 font-mono whitespace-nowrap">
+                            {lastUpdatedLabel}
+                          </td>
+                          <td className="py-3 px-5 text-right">
+                            {n.hasUpdate && onUpdateSingleNode ? (
+                              <button
+                                onClick={() => handleUpdateSingleClick(n.folderName)}
+                                disabled={updatingFolder !== null || busyAction !== null}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-lg transition-colors"
+                              >
+                                {updatingFolder === n.folderName ? (
+                                  <>
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    <span>Updating...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Download className="w-3.5 h-3.5" />
+                                    <span>Update</span>
+                                  </>
+                                )}
+                              </button>
+                            ) : (
+                              <span className="text-[11px] text-slate-600 font-mono">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
