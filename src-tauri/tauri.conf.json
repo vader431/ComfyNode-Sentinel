@@ -1,20 +1,20 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "comfynode-sentinel",
+  "productName": "ComfyNode Sentinel",
   "version": "0.1.0",
-  "identifier": "com.tauri.dev",
+  "identifier": "com.comfynode.sentinel",
   "build": {
-    "frontendDist": "../out",
+    "frontendDist": "loading",
     "devUrl": "http://localhost:3000",
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build"
+    "beforeBuildCommand": "node scripts/prepare-desktop.mjs"
   },
   "app": {
     "windows": [
       {
         "title": "ComfyNode Sentinel",
-        "width": 800,
-        "height": 600,
+        "width": 1280,
+        "height": 840,
         "resizable": true,
         "fullscreen": false
       }
@@ -26,6 +26,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": [
+      "standalone-server/**/*"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -1,6 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::net::{TcpListener, TcpStream};
 use std::path::Path;
+use std::process::{Child, Command};
+use std::sync::Mutex;
+use std::time::Duration;
+use tauri::Manager;
+
+struct StandaloneServer(Mutex<Option<Child>>);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EnvironmentCheckResult {
@@ -157,7 +164,8 @@ fn scan_custom_nodes(custom_nodes_path: String) -> Result<Vec<DiscoveredNode>, S
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
+        .manage(StandaloneServer(Mutex::new(None)))
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -165,6 +173,55 @@ pub fn run() {
                         .level(log::LevelFilter::Info)
                         .build(),
                 )?;
+            } else {
+                // Launch bundled Next.js standalone server on a free localhost port
+                let port = TcpListener::bind("127.0.0.1:0")
+                    .and_then(|l| l.local_addr())
+                    .map(|a| a.port())
+                    .unwrap_or(3188);
+
+                if let Ok(resource_dir) = app.path().resource_dir() {
+                    let server_dir = resource_dir.join("standalone-server");
+                    let server_js = server_dir.join("server.js");
+                    if server_js.exists() {
+                        let mut cmd = Command::new("node");
+                        cmd.arg(&server_js)
+                            .current_dir(&server_dir)
+                            .env("PORT", port.to_string())
+                            .env("HOSTNAME", "127.0.0.1");
+
+                        #[cfg(target_os = "windows")]
+                        {
+                            use std::os::windows::process::CommandExt;
+                            const CREATE_NO_WINDOW: u32 = 0x08000000;
+                            cmd.creation_flags(CREATE_NO_WINDOW);
+                        }
+
+                        if let Ok(child) = cmd.spawn() {
+                            if let Some(state) = app.try_state::<StandaloneServer>() {
+                                if let Ok(mut guard) = state.0.lock() {
+                                    *guard = Some(child);
+                                }
+                            }
+
+                            let handle = app.handle().clone();
+                            std::thread::spawn(move || {
+                                let addr = format!("127.0.0.1:{}", port);
+                                for _ in 0..40 {
+                                    if TcpStream::connect(&addr).is_ok() {
+                                        if let Some(win) = handle.get_webview_window("main") {
+                                            if let Ok(url) = format!("http://{}/", addr).parse() {
+                                                let _ = win.navigate(url);
+                                            }
+                                        }
+                                        break;
+                                    }
+                                    std::thread::sleep(Duration::from_millis(150));
+                                }
+                            });
+                        }
+                    }
+                }
             }
             Ok(())
         })
@@ -174,8 +231,20 @@ pub fn run() {
             quarantine_node_to_trash,
             scan_custom_nodes
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            if let Some(state) = app_handle.try_state::<StandaloneServer>() {
+                if let Ok(mut guard) = state.0.lock() {
+                    if let Some(mut child) = guard.take() {
+                        let _ = child.kill();
+                    }
+                }
+            }
+        }
+    });
 }
 
 #[cfg(test)]

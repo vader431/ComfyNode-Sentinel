@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ComfyNode Sentinel</title>
+    <style>
+      body {
+        margin: 0;
+        background: #0b0f17;
+        color: #94a3b8;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        font-size: 13px;
+      }
+      .wrap {
+        text-align: center;
+      }
+      .dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 9999px;
+        background: #6366f1;
+        margin-right: 8px;
+        animation: pulse 1s infinite ease-in-out;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 0.35; }
+        50% { opacity: 1; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <span class="dot"></span>Starting ComfyNode Sentinel...
+    </div>
+  </body>
+</html>
+

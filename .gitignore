@@ -6,3 +6,5 @@ coverage/
 *.tsbuildinfo
 .env*
 !.env.example
+src-tauri/standalone-server/
+src-tauri/target/
