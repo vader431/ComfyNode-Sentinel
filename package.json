@@ -9,6 +9,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
     "clean": "next clean"
   },
   "dependencies": {
