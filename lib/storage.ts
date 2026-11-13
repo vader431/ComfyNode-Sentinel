@@ -52,11 +52,25 @@ export const StorageService = {
   getTasks: (): RoadmapTask[] => getStoredItem(STORAGE_KEYS.TASKS, INITIAL_ROADMAP_TASKS),
   setTasks: (tasks: RoadmapTask[]): void => setStoredItem(STORAGE_KEYS.TASKS, tasks),
 
-  getNodes: (): InstalledNode[] => getStoredItem(STORAGE_KEYS.NODES, []),
-  setNodes: (nodes: InstalledNode[]): void => setStoredItem(STORAGE_KEYS.NODES, nodes),
+  getNodes: (): InstalledNode[] => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(STORAGE_KEYS.NODES);
+    }
+    return [];
+  },
+  setNodes: (_nodes: InstalledNode[]): void => {
+    // Real filesystem (custom_nodes/) is the source of truth; do not cache mock nodes in localStorage.
+  },
 
-  getTrash: (): InstalledNode[] => getStoredItem(STORAGE_KEYS.TRASH, []),
-  setTrash: (nodes: InstalledNode[]): void => setStoredItem(STORAGE_KEYS.TRASH, nodes),
+  getTrash: (): InstalledNode[] => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(STORAGE_KEYS.TRASH);
+    }
+    return [];
+  },
+  setTrash: (_nodes: InstalledNode[]): void => {
+    // Real filesystem (.sentinel_trash/) is the source of truth.
+  },
 
   getProfiles: (): WorkspaceProfile[] => getStoredItem(STORAGE_KEYS.PROFILES, INITIAL_PROFILES),
   setProfiles: (profiles: WorkspaceProfile[]): void => setStoredItem(STORAGE_KEYS.PROFILES, profiles),

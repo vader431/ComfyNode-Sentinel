@@ -156,6 +156,10 @@ export default function Home() {
           StorageService.setTrash(scan.trashNodes);
           setScannedRequirementsMap(scan.requirementsMap);
         }
+      } else {
+        setNodes([]);
+        setTrashNodes([]);
+        setScannedRequirementsMap({});
       }
     } catch {
       // Ignore startup network errors if backend is still initializing
