@@ -12,10 +12,14 @@ import {
   Terminal,
   Square,
   ExternalLink,
+  Cpu,
+  Zap,
+  OctagonX,
 } from 'lucide-react';
 import { SentinelLogo } from './SentinelLogo';
 import type { ComfyProcessStatus } from '@/lib/comfy-process';
-import type { ComfyInstance } from '@/types';
+import { summarizePrimaryGpu } from '@/lib/comfy-telemetry';
+import type { ComfyInstance, ComfyLiveTelemetry, ComfyWsProgressState } from '@/types';
 import pkg from '../package.json';
 
 export type ActiveTab =
@@ -42,6 +46,11 @@ interface HeaderProps {
   comfyProcessStatus?: ComfyProcessStatus;
   comfyProcessPid?: number | null;
   comfyPort?: number;
+  comfyTelemetry?: ComfyLiveTelemetry | null;
+  comfyWsState?: ComfyWsProgressState;
+  onInterruptComfy?: () => void;
+  onFreeComfyVram?: () => void;
+  onOpenTelemetryDrawer?: () => void;
   instances?: ComfyInstance[];
   activeInstanceId?: string;
   onSwitchInstance?: (instanceId: string) => void;
@@ -63,6 +72,11 @@ export function Header({
   comfyProcessStatus = 'stopped',
   comfyProcessPid = null,
   comfyPort = 8188,
+  comfyTelemetry = null,
+  comfyWsState,
+  onInterruptComfy,
+  onFreeComfyVram,
+  onOpenTelemetryDrawer,
   instances = [],
   activeInstanceId,
   onSwitchInstance,
@@ -70,9 +84,24 @@ export function Header({
   onToggleConsoleDrawer,
   isConsoleDrawerOpen,
 }: HeaderProps) {
+  const isComfyOnline = Boolean(comfyTelemetry?.online) || comfyProcessStatus === 'running';
+  const primaryGpu = summarizePrimaryGpu(comfyTelemetry?.systemStats?.devices);
+  const runningCount = comfyTelemetry?.queue.runningCount ?? 0;
+  const pendingCount = comfyTelemetry?.queue.pendingCount ?? 0;
+  const stepProgress = comfyWsState?.stepProgress ?? null;
+  const executingNode = comfyWsState?.executingNode ?? null;
+  const isGenerating = runningCount > 0 || Boolean(executingNode) || Boolean(stepProgress);
+
+  const vramBarColor =
+    primaryGpu?.pressureTone === 'critical'
+      ? 'bg-rose-500'
+      : primaryGpu?.pressureTone === 'elevated'
+      ? 'bg-amber-500'
+      : 'bg-emerald-500';
+
   return (
     <header className="sticky top-0 z-40 w-full h-12 border-b border-slate-800/80 bg-[#070a10]/95 backdrop-blur-md">
-      <div className="flex h-full w-full items-center justify-between gap-3 px-4 lg:px-6">
+      <div className="flex h-full w-full items-center justify-between gap-2 px-4 lg:px-6">
         {/* Left: Mobile Menu + Brand Wordmark */}
         <div className="flex items-center gap-3 shrink-0">
           {onToggleMobileMenu && (
@@ -94,7 +123,7 @@ export function Header({
               <span className="text-sm font-semibold tracking-tight text-white whitespace-nowrap">
                 ComfyNode Sentinel
               </span>
-              <span className="px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700/80 text-[10px] font-mono text-indigo-300">
+              <span className="px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700/80 text-[10px] font-mono tabular-nums text-indigo-300">
                 v{pkg.version}
               </span>
               <span className="hidden sm:inline text-[10px] text-slate-500 font-mono">
@@ -104,14 +133,14 @@ export function Header({
           </button>
         </div>
 
-        {/* Right: Instance Switcher, Environment Pill, Rescan, Console Drawer, Torch Shield, Launch */}
+        {/* Right: Instance Switcher, Live Telemetry Strip, Environment Status, Rescan, Console, Launch */}
         <div className="flex items-center gap-2 shrink-0">
           {instances.length > 0 && onSwitchInstance && (
             <select
               value={activeInstanceId || instances[0]?.id || ''}
               onChange={(e) => onSwitchInstance(e.target.value)}
               title="Switch ComfyUI Instance"
-              className="hidden lg:block px-2.5 py-1 rounded-lg bg-slate-900/90 border border-slate-800 text-[11px] font-medium text-slate-200 focus:outline-none focus:border-indigo-500 max-w-[170px] truncate"
+              className="hidden xl:block px-2.5 py-1 rounded-lg bg-slate-900/90 border border-slate-800 text-[11px] font-medium text-slate-200 focus:outline-none focus:border-indigo-500 max-w-[160px] truncate"
             >
               {instances.map((inst) => (
                 <option key={inst.id} value={inst.id}>
@@ -120,6 +149,96 @@ export function Header({
               ))}
             </select>
           )}
+
+          {/* Live ComfyUI GPU & Queue Telemetry Strip */}
+          {comfyTelemetry?.online && (
+            <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#121216] border border-slate-800/90 text-[11px] font-mono tabular-nums">
+              <button
+                type="button"
+                onClick={onOpenTelemetryDrawer || onToggleConsoleDrawer}
+                title={
+                  primaryGpu
+                    ? `${primaryGpu.deviceName} • VRAM ${primaryGpu.vramUsedGiB}/${primaryGpu.vramTotalGiB} GiB (${primaryGpu.vramPercent}%) — Click to inspect GPU & Queue`
+                    : 'Open Live ComfyUI GPU & Queue Monitor'
+                }
+                className="flex items-center gap-2 text-left hover:text-white transition-colors"
+              >
+                <Cpu className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                {primaryGpu ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-300 font-semibold max-w-[96px] truncate">
+                      {primaryGpu.shortName}
+                    </span>
+                    <div className="w-14 h-1.5 rounded-sm bg-slate-800 overflow-hidden">
+                      <div
+                        className={`h-full transition-all duration-300 ${vramBarColor}`}
+                        style={{ width: `${primaryGpu.vramPercent}%` }}
+                      />
+                    </div>
+                    <span
+                      className={
+                        primaryGpu.pressureTone === 'critical'
+                          ? 'text-rose-300 font-semibold'
+                          : primaryGpu.pressureTone === 'elevated'
+                          ? 'text-amber-300'
+                          : 'text-emerald-300'
+                      }
+                    >
+                      {primaryGpu.vramUsedGiB.toFixed(1)}/{primaryGpu.vramTotalGiB.toFixed(0)}G
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-emerald-300">:{comfyPort} Online</span>
+                )}
+
+                <span className="text-slate-700">|</span>
+
+                {stepProgress ? (
+                  <span className="flex items-center gap-1 text-indigo-300 font-semibold">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping" />
+                    <span>
+                      Step {stepProgress.value}/{stepProgress.max}
+                    </span>
+                  </span>
+                ) : isGenerating ? (
+                  <span className="flex items-center gap-1 text-emerald-300 font-semibold">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>
+                      {executingNode ? `Node #${executingNode}` : `Run ${runningCount}`}
+                      {pendingCount > 0 ? ` (+${pendingCount})` : ''}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="text-slate-400">
+                    Queue {pendingCount > 0 ? pendingCount : 'Idle'}
+                  </span>
+                )}
+              </button>
+
+              {isGenerating && onInterruptComfy && (
+                <button
+                  type="button"
+                  onClick={onInterruptComfy}
+                  title="Interrupt active ComfyUI generation (POST /interrupt)"
+                  className="ml-1 p-1 rounded bg-rose-950/70 hover:bg-rose-900 border border-rose-700/60 text-rose-300 hover:text-white transition-colors"
+                >
+                  <OctagonX className="w-3 h-3" />
+                </button>
+              )}
+
+              {onFreeComfyVram && (
+                <button
+                  type="button"
+                  onClick={onFreeComfyVram}
+                  title="Unload cached models & flush CUDA VRAM (POST /free)"
+                  className="p-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-indigo-300 hover:text-white transition-colors"
+                >
+                  <Zap className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          )}
+
           <button
             onClick={() => setActiveTab('settings')}
             title="Configure ComfyUI root directory"
@@ -161,7 +280,7 @@ export function Header({
           {onToggleConsoleDrawer && (
             <button
               onClick={onToggleConsoleDrawer}
-              title="Toggle Console Quick-Peek Drawer"
+              title="Toggle Console & Live GPU Telemetry Drawer"
               className={`p-1.5 rounded-lg border transition-colors ${
                 isConsoleDrawerOpen
                   ? 'bg-indigo-600/20 border-indigo-500/50 text-indigo-300'
@@ -185,26 +304,30 @@ export function Header({
           )}
 
           {onLaunchComfyUI && (
-            comfyProcessStatus === 'running' || comfyProcessStatus === 'starting' ? (
+            isComfyOnline || comfyProcessStatus === 'starting' ? (
               <div className="flex items-center gap-1.5 shrink-0">
                 <span
-                  title={comfyProcessPid ? `ComfyUI PID ${comfyProcessPid}` : 'ComfyUI Process'}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-mono rounded-lg border ${
-                    comfyProcessStatus === 'running'
+                  title={
+                    comfyProcessPid
+                      ? `Managed ComfyUI PID ${comfyProcessPid}`
+                      : `ComfyUI reachable on 127.0.0.1:${comfyPort}`
+                  }
+                  className={`flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-mono tabular-nums rounded-lg border ${
+                    isComfyOnline
                       ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-300'
                       : 'bg-amber-950/50 border-amber-500/40 text-amber-300'
                   }`}
                 >
                   <span
                     className={`w-1.5 h-1.5 rounded-full ${
-                      comfyProcessStatus === 'running' ? 'bg-emerald-400' : 'bg-amber-400 animate-ping'
+                      isComfyOnline ? 'bg-emerald-400' : 'bg-amber-400 animate-ping'
                     }`}
                   />
                   <span className="hidden md:inline">
-                    {comfyProcessStatus === 'running' ? `Running :${comfyPort}` : 'Starting…'}
+                    {isComfyOnline ? `Running :${comfyPort}` : 'Starting…'}
                   </span>
                 </span>
-                {comfyProcessStatus === 'running' && (
+                {isComfyOnline && (
                   <a
                     href={`http://127.0.0.1:${comfyPort}`}
                     target="_blank"
@@ -215,19 +338,19 @@ export function Header({
                     <ExternalLink className="w-3.5 h-3.5" />
                   </a>
                 )}
-                {onRestartComfyUI && (
+                {onRestartComfyUI && (comfyProcessStatus === 'running' || comfyProcessStatus === 'starting') && (
                   <button
                     onClick={onRestartComfyUI}
-                    title="Restart ComfyUI"
+                    title="Restart Managed ComfyUI"
                     className="p-1.5 rounded-lg text-amber-300 hover:text-amber-200 bg-slate-900/60 hover:bg-slate-800 border border-slate-800 transition-colors"
                   >
                     <RotateCw className="w-3.5 h-3.5" />
                   </button>
                 )}
-                {onStopComfyUI && (
+                {onStopComfyUI && (comfyProcessStatus === 'running' || comfyProcessStatus === 'starting') && (
                   <button
                     onClick={onStopComfyUI}
-                    title="Stop ComfyUI"
+                    title="Stop Managed ComfyUI"
                     className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 rounded-lg transition-colors shadow-sm"
                   >
                     <Square className="w-3 h-3 fill-current" />

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   FolderCheck,
   FolderOpen,
@@ -15,13 +15,17 @@ import {
   Trash2,
   Download,
   Layers,
+  ExternalLink,
+  Package,
 } from 'lucide-react';
-import { ComfyInstance, EnvironmentSettings } from '@/types';
+import { ComfyInstance, DesktopRuntimeInfo, EnvironmentSettings } from '@/types';
 import { checkEnvironmentReal } from '@/lib/system-client';
 import {
   AppUpdateStatus,
+  detectClientPlatformFamily,
   isTauriEnvironment,
   nativeCheckAppUpdate,
+  nativeGetDesktopRuntimeInfo,
   nativePickDirectory,
   nativePickFile,
   nativeSetMinimizeToTray,
@@ -36,6 +40,11 @@ interface SettingsViewProps {
   onSaveInstances?: (instances: ComfyInstance[]) => void;
   onSwitchInstance?: (instanceId: string) => void;
   onResetAllData: () => void;
+}
+
+function formatAssetSizeMb(bytes: number): string {
+  if (!bytes || bytes <= 0) return '';
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export function SettingsView({
@@ -57,10 +66,22 @@ export function SettingsView({
   const [newInstanceName, setNewInstanceName] = useState('');
   const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus | null>(null);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
+  const [desktopInfo, setDesktopInfo] = useState<DesktopRuntimeInfo | null>(null);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [pythonVersion, setPythonVersion] = useState<string>('');
+
+  const isTauri = isTauriEnvironment();
+  const detectedPlatform = detectClientPlatformFamily();
+
+  useEffect(() => {
+    if (!isTauri) return;
+    void nativeGetDesktopRuntimeInfo().then((info) => {
+      if (info) setDesktopInfo(info);
+    });
+  }, [isTauri]);
 
   const handleValidateAndSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -117,6 +138,16 @@ export function SettingsView({
     }
   };
 
+  const handleCheckUpdates = async () => {
+    setIsCheckingUpdate(true);
+    try {
+      const res = await nativeCheckAppUpdate(pkg.version);
+      setUpdateStatus(res);
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header Banner */}
@@ -124,15 +155,15 @@ export function SettingsView({
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 text-xs text-slate-400">
-              <span>Environment & Paths</span>
+              <span>Environment &amp; Desktop Packaging</span>
               <span aria-hidden="true">·</span>
-              <span>Setup Wizard (Phase 0)</span>
+              <span>Runtime Configuration</span>
             </div>
             <h1 className="text-xl md:text-2xl font-bold text-white tracking-tight mt-1">
-              ComfyUI Environment Configuration
+              ComfyUI Environment &amp; Desktop Updater
             </h1>
             <p className="text-xs md:text-sm text-slate-400 mt-1 max-w-2xl">
-              Configure path discovery for <code>main.py</code>, <code>custom_nodes/</code>, and your designated Python runtime binary (Windows Portable embeded, venv, or system PATH).
+              Configure path discovery for <code>main.py</code>, <code>custom_nodes/</code>, your designated Python runtime binary, and inspect Tauri v2 desktop updates.
             </p>
           </div>
         </div>
@@ -152,7 +183,7 @@ export function SettingsView({
 
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1">
-                Root Filesystem Path (Rust command: <code>validate_comfy_root</code>)
+                Root Filesystem Path (Rust command: <code>check_environment</code>)
               </label>
               <div className="flex gap-2">
                 <input
@@ -162,7 +193,7 @@ export function SettingsView({
                   onChange={(e) => setComfyRootInput(e.target.value)}
                   className="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
                 />
-                {isTauriEnvironment() && (
+                {isTauri && (
                   <button
                     type="button"
                     onClick={async () => {
@@ -200,7 +231,7 @@ export function SettingsView({
             <div className="flex items-center gap-2 pb-2 border-b border-slate-800">
               <Cpu className="w-4 h-4 text-emerald-400" />
               <h3 className="text-sm font-semibold text-white">
-                Python Binary Discovery (Rust: <code>detect_python_binary</code>)
+                Python Binary Discovery
               </h3>
             </div>
 
@@ -268,7 +299,7 @@ export function SettingsView({
                   onChange={(e) => setPythonBinaryInput(e.target.value)}
                   className="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
                 />
-                {isTauriEnvironment() && (
+                {isTauri && (
                   <button
                     type="button"
                     onClick={async () => {
@@ -290,7 +321,7 @@ export function SettingsView({
             <div className="flex items-center gap-2 pb-2 border-b border-slate-800">
               <ShieldCheck className="w-4 h-4 text-indigo-400" />
               <h3 className="text-sm font-semibold text-white">
-                Safety & Display Preferences
+                Safety &amp; Display Preferences
               </h3>
             </div>
 
@@ -335,7 +366,7 @@ export function SettingsView({
                     ComfyUI Server Port
                   </div>
                   <div className="text-[11px] text-slate-400">
-                    Port passed to <code className="font-mono">main.py --port</code> for this instance.
+                    Port passed to <code className="font-mono">main.py --port</code> and used for live WebSocket/GPU telemetry.
                   </div>
                 </div>
                 <input
@@ -344,11 +375,11 @@ export function SettingsView({
                   max={65535}
                   value={comfyPortInput}
                   onChange={(e) => setComfyPortInput(Number(e.target.value) || 8188)}
-                  className="w-24 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono text-slate-100 focus:outline-none focus:border-indigo-500"
+                  className="w-24 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono tabular-nums text-slate-100 focus:outline-none focus:border-indigo-500"
                 />
               </div>
 
-              {isTauriEnvironment() && (
+              {isTauri && (
                 <label className="flex items-center justify-between p-3 rounded-lg border border-slate-800 bg-slate-950 cursor-pointer">
                   <div>
                     <div className="text-xs font-semibold text-slate-200">
@@ -386,37 +417,172 @@ export function SettingsView({
           </div>
         </form>
 
-        {/* Diagnostic Card (1 col) */}
+        {/* Right Column: Desktop Packaging, Auto-Updater & Instances */}
         <div className="space-y-6">
+          {/* Desktop Runtime & Packaging Diagnostic */}
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 shadow-sm space-y-4">
             <div className="flex items-center gap-2 pb-2 border-b border-slate-800">
               <Terminal className="w-4 h-4 text-indigo-400" />
               <h3 className="text-sm font-semibold text-white">
-                Environment Diagnostic
+                Desktop &amp; Runtime Diagnostic
               </h3>
             </div>
 
-            <div className="space-y-3 text-xs font-mono">
+            <div className="space-y-3 text-xs font-mono tabular-nums">
               <div>
-                <div className="text-slate-500 text-[10px]">App Platform:</div>
-                <div className="text-slate-300 font-semibold">Tauri v2 + Rust tokio</div>
+                <div className="text-slate-500 text-[10px]">Runtime Shell:</div>
+                <div className="text-slate-200 font-semibold">
+                  {isTauri ? 'Tauri v2 Native Desktop' : 'Next.js Standalone Web Console'}
+                </div>
               </div>
 
               <div>
-                <div className="text-slate-500 text-[10px]">Active OS Target:</div>
-                <div className="text-slate-300">Windows 10/11 x86_64</div>
+                <div className="text-slate-500 text-[10px]">Detected Target Platform:</div>
+                <div className="text-slate-300">
+                  {desktopInfo
+                    ? `${desktopInfo.os} (${desktopInfo.arch})`
+                    : `${detectedPlatform.toUpperCase()} Client`}
+                </div>
               </div>
 
+              {desktopInfo && (
+                <div>
+                  <div className="text-slate-500 text-[10px]">Bundled Node Sidecar:</div>
+                  <div className={desktopInfo.hasBundledNode ? 'text-emerald-400' : 'text-amber-300'}>
+                    {desktopInfo.hasBundledNode
+                      ? 'Verified (Embedded Node Runtime)'
+                      : 'System Node Fallback'}
+                  </div>
+                </div>
+              )}
+
               <div>
-                <div className="text-slate-500 text-[10px]">Lockfile Engine:</div>
+                <div className="text-slate-500 text-[10px]">Lockfile Schema:</div>
                 <div className="text-slate-300">comfy-lock.json v1.0.0</div>
               </div>
-
-              <div>
-                <div className="text-slate-500 text-[10px]">Storage Backend:</div>
-                <div className="text-slate-300">tauri-plugin-store (Local)</div>
-              </div>
             </div>
+          </div>
+
+          {/* Desktop Packaging & Auto-Updater Center */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 shadow-sm space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Package className="w-4 h-4 text-indigo-400" />
+                <h4 className="text-xs font-semibold text-white font-mono tabular-nums">
+                  Release &amp; Updater (v{pkg.version})
+                </h4>
+              </div>
+              <button
+                type="button"
+                disabled={isCheckingUpdate}
+                onClick={handleCheckUpdates}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 disabled:opacity-50 transition-colors"
+              >
+                <Download className="w-3 h-3 text-indigo-400" />
+                <span>{isCheckingUpdate ? 'Checking…' : 'Check Updates'}</span>
+              </button>
+            </div>
+
+            {!updateStatus ? (
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Checks Tauri signed update manifest and GitHub Releases for platform installers (<code>.msi</code>, <code>.exe</code>, <code>.dmg</code>, <code>.AppImage</code>).
+              </p>
+            ) : updateStatus.error ? (
+              <div className="text-[11px] font-mono text-rose-400 p-2.5 rounded-lg bg-rose-950/30 border border-rose-800/50">
+                {updateStatus.error}
+              </div>
+            ) : (
+              <div className="space-y-3 text-xs">
+                {updateStatus.available ? (
+                  <div className="p-3 rounded-lg border border-emerald-500/40 bg-emerald-950/20 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono font-semibold text-emerald-300 tabular-nums">
+                        Update Available: v{updateStatus.version}
+                      </span>
+                      {updateStatus.isSignedNativeUpdate && (
+                        <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-200 text-[10px] font-mono">
+                          Signed Tauri Update
+                        </span>
+                      )}
+                    </div>
+
+                    {updateStatus.installAndRelaunch ? (
+                      <button
+                        type="button"
+                        disabled={isInstallingUpdate}
+                        onClick={async () => {
+                          setIsInstallingUpdate(true);
+                          try {
+                            await updateStatus.installAndRelaunch?.();
+                          } finally {
+                            setIsInstallingUpdate(false);
+                          }
+                        }}
+                        className="w-full py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold transition-colors"
+                      >
+                        {isInstallingUpdate
+                          ? 'Downloading & Verifying Signature…'
+                          : 'Download, Install & Relaunch'}
+                      </button>
+                    ) : updateStatus.matchedAsset ? (
+                      <a
+                        href={updateStatus.matchedAsset.downloadUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center justify-between gap-2 w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors"
+                      >
+                        <span className="truncate">
+                          Download {updateStatus.matchedAsset.platformLabel}
+                        </span>
+                        <span className="text-[10px] font-mono tabular-nums opacity-90 shrink-0">
+                          {formatAssetSizeMb(updateStatus.matchedAsset.sizeBytes)}
+                        </span>
+                      </a>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="p-2.5 rounded-lg border border-slate-800 bg-slate-950/60 flex items-center justify-between text-[11px] font-mono text-slate-300">
+                    <span>Up to date (v{pkg.version})</span>
+                    {updateStatus.releaseUrl && (
+                      <a
+                        href={updateStatus.releaseUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-1 text-indigo-300 hover:text-indigo-200"
+                      >
+                        <span>Releases</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
+                )}
+
+                {updateStatus.matchedAsset && !updateStatus.available && (
+                  <div className="p-2.5 rounded-lg border border-slate-800 bg-slate-950/80 space-y-1.5">
+                    <div className="text-[10px] font-mono text-slate-400">
+                      Matched Desktop Installer for Your OS:
+                    </div>
+                    <a
+                      href={updateStatus.matchedAsset.downloadUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center justify-between gap-2 text-[11px] font-mono text-indigo-300 hover:text-indigo-200"
+                    >
+                      <span className="truncate">{updateStatus.matchedAsset.name}</span>
+                      <span className="text-slate-500 shrink-0 tabular-nums">
+                        {formatAssetSizeMb(updateStatus.matchedAsset.sizeBytes)}
+                      </span>
+                    </a>
+                  </div>
+                )}
+
+                {updateStatus.notes && (
+                  <div className="p-2.5 rounded-lg border border-slate-800/80 bg-slate-950/70 max-h-32 overflow-y-auto text-[11px] font-mono text-slate-400 whitespace-pre-wrap">
+                    {updateStatus.notes}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* ComfyUI Instances Manager */}
@@ -447,7 +613,10 @@ export function SettingsView({
                         className="text-left min-w-0 flex-1"
                       >
                         <div className="font-semibold text-slate-200 truncate">
-                          {inst.name} <span className="text-[10px] font-mono text-indigo-300">:{inst.port}</span>
+                          {inst.name}{' '}
+                          <span className="text-[10px] font-mono tabular-nums text-indigo-300">
+                            :{inst.port}
+                          </span>
                         </div>
                         <div className="text-[10px] font-mono text-slate-500 truncate">
                           {inst.comfyRoot}
@@ -501,49 +670,6 @@ export function SettingsView({
               </div>
             </div>
           )}
-
-          {/* App Updates */}
-          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 shadow-sm space-y-3">
-            <div className="flex items-center justify-between">
-              <h4 className="text-xs font-semibold text-white">App Updates (v{pkg.version})</h4>
-              <button
-                type="button"
-                disabled={isCheckingUpdate}
-                onClick={async () => {
-                  setIsCheckingUpdate(true);
-                  const res = await nativeCheckAppUpdate(pkg.version);
-                  setUpdateStatus(res);
-                  setIsCheckingUpdate(false);
-                }}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 disabled:opacity-50"
-              >
-                <Download className="w-3 h-3 text-indigo-400" />
-                <span>{isCheckingUpdate ? 'Checking…' : 'Check Updates'}</span>
-              </button>
-            </div>
-            {updateStatus && (
-              <div className="text-[11px] font-mono text-slate-300">
-                {updateStatus.error ? (
-                  <span className="text-rose-400">{updateStatus.error}</span>
-                ) : updateStatus.available ? (
-                  <div className="flex items-center justify-between gap-2 text-emerald-300">
-                    <span>Update available: v{updateStatus.version}</span>
-                    {updateStatus.installAndRelaunch && (
-                      <button
-                        type="button"
-                        onClick={() => void updateStatus.installAndRelaunch?.()}
-                        className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-sans font-semibold"
-                      >
-                        Install &amp; Restart
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <span className="text-slate-400">You are on the latest release (v{pkg.version}).</span>
-                )}
-              </div>
-            )}
-          </div>
 
           <div className="rounded-xl border border-rose-900/40 bg-rose-950/20 p-5 shadow-sm space-y-3">
             <h4 className="text-xs font-semibold text-rose-300">

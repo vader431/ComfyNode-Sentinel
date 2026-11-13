@@ -224,3 +224,103 @@ export interface UpdateTransaction {
   status: 'applied' | 'rolled_back';
   rollbackCommand: string;
 }
+
+export type PhaseId =
+  | 'phase0'
+  | 'phase1'
+  | 'phase2'
+  | 'phase3'
+  | 'phase4'
+  | 'phase5'
+  | 'phase6'
+  | 'phase7'
+  | 'phase8'
+  | (string & {});
+
+export interface RoadmapTask {
+  id: string;
+  phase: PhaseId;
+  phaseTitle?: string;
+  title: string;
+  description: string;
+  status: 'todo' | 'in_progress' | 'done' | (string & {});
+  priority: 'critical' | 'high' | 'medium' | 'low' | (string & {});
+  category?: string;
+  completed?: boolean;
+  tags?: string[];
+  labels?: string[];
+  rustCommands?: string[];
+  subtasks?: string[];
+  acceptanceCriteria?: string[];
+  estimatedEffort?: string;
+}
+
+export interface ComfyDeviceStats {
+  name: string;
+  type: string;
+  index: number;
+  vram_total: number;
+  vram_free: number;
+  torch_vram_total: number;
+  torch_vram_free: number;
+}
+
+export interface ComfySystemStats {
+  system: {
+    os: string;
+    ram_total: number;
+    ram_free: number;
+    comfyui_version?: string;
+    python_version: string;
+    pytorch_version: string;
+    embedded_python: boolean;
+  };
+  devices: ComfyDeviceStats[];
+}
+
+export interface ComfyQueueItemSummary {
+  promptId: string;
+  number: number;
+  nodeCount: number;
+}
+
+export interface ComfyQueueState {
+  runningCount: number;
+  pendingCount: number;
+  runningItems: ComfyQueueItemSummary[];
+  pendingItems: ComfyQueueItemSummary[];
+}
+
+export interface ComfyWsProgressState {
+  wsConnected: boolean;
+  executingNode: string | null;
+  currentPromptId: string | null;
+  stepProgress: {
+    value: number;
+    max: number;
+  } | null;
+}
+
+export interface ComfyLiveTelemetry {
+  online: boolean;
+  port: number;
+  latencyMs: number | null;
+  systemStats: ComfySystemStats | null;
+  queue: ComfyQueueState;
+  updatedAt: string;
+}
+
+export interface DesktopReleaseAsset {
+  name: string;
+  downloadUrl: string;
+  sizeBytes: number;
+  platformLabel: string;
+}
+
+export interface DesktopRuntimeInfo {
+  os: string;
+  arch: string;
+  hasBundledNode: boolean;
+  bundledNodePath: string | null;
+  hasStandaloneServer: boolean;
+}

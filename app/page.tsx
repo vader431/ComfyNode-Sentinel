@@ -5,7 +5,7 @@ import { Header, ActiveTab } from '@/components/Header';
 import { Sidebar } from '@/components/Sidebar';
 import { OnboardingCard } from '@/components/OnboardingCard';
 import { ToastContainer, ToastMessage } from '@/components/ToastContainer';
-import { ConsoleDrawer } from '@/components/ConsoleDrawer';
+import { ConsoleDrawer, ConsoleDrawerTab } from '@/components/ConsoleDrawer';
 import { StatusBar } from '@/components/StatusBar';
 import { InspectorView } from '@/components/views/InspectorView';
 import { TerminalRunnerView } from '@/components/views/TerminalRunnerView';
@@ -21,7 +21,17 @@ import {
   recordTransaction,
   rollbackTransaction,
 } from '@/lib/transaction-history';
-import { isTauriEnvironment, nativeSetMinimizeToTray } from '@/lib/tauri-bridge';
+import {
+  isTauriEnvironment,
+  nativeSetMinimizeToTray,
+  nativeSyncTrayStatus,
+} from '@/lib/tauri-bridge';
+import {
+  applyComfyWsMessage,
+  fetchComfyTelemetry,
+  sendComfyTelemetryAction,
+  summarizePrimaryGpu,
+} from '@/lib/comfy-telemetry';
 import {
   checkEnvironmentReal,
   scanNodesReal,
@@ -40,6 +50,8 @@ import {
   WorkspaceProfile,
   EnvironmentSettings,
   ComfyInstance,
+  ComfyLiveTelemetry,
+  ComfyWsProgressState,
   PipQueueItem,
   TerminalLogEntry,
   RegistryNode,
@@ -61,11 +73,28 @@ export default function Home() {
     () => false
   );
 
+  if (!isClient) {
+    return (
+      <div
+        suppressHydrationWarning
+        className="min-h-screen flex items-center justify-center bg-[#0b0f17] text-slate-400 font-mono text-xs"
+      >
+        Loading ComfyNode Sentinel...
+      </div>
+    );
+  }
+
+  return <SentinelWorkspace />;
+}
+
+function SentinelWorkspace() {
+  const isClient = true;
   const [activeTab, setActiveTab] = useState<ActiveTab>('inspector');
   const [targetRunnerCommand, setTargetRunnerCommand] = useState<string>('');
   const [isScanning, setIsScanning] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isConsoleDrawerOpen, setIsConsoleDrawerOpen] = useState(false);
+  const [consoleDrawerTab, setConsoleDrawerTab] = useState<ConsoleDrawerTab>('logs');
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [updateProgress, setUpdateProgress] = useState<{
     active: boolean;
@@ -91,6 +120,13 @@ export default function Home() {
   const [setupBannerDismissed, setSetupBannerDismissed] = useState(false);
   const [comfyProcessStatus, setComfyProcessStatus] = useState<'stopped' | 'starting' | 'running' | 'error'>('stopped');
   const [comfyProcessPid, setComfyProcessPid] = useState<number | null>(null);
+  const [comfyTelemetry, setComfyTelemetry] = useState<ComfyLiveTelemetry | null>(null);
+  const [comfyWsState, setComfyWsState] = useState<ComfyWsProgressState>({
+    wsConnected: false,
+    executingNode: null,
+    currentPromptId: null,
+    stepProgress: null,
+  });
   const comfyLastLogIdRef = React.useRef<number>(0);
 
   const addLog = (entry: Omit<TerminalLogEntry, 'id'>) => {
@@ -236,6 +272,97 @@ export default function Home() {
       cancelled = true;
     };
   }, [isClient, comfyProcessStatus]);
+
+  const activeComfyPort = settings.comfyPort || 8188;
+  const isComfyTelemetryOnline = Boolean(comfyTelemetry?.online);
+
+  // Poll live ComfyUI /system_stats and /queue via server proxy
+  useEffect(() => {
+    if (!isClient) return;
+    let cancelled = false;
+
+    const pollTelemetry = async () => {
+      const next = await fetchComfyTelemetry(activeComfyPort);
+      if (cancelled) return;
+      setComfyTelemetry(next);
+
+      const gpu = summarizePrimaryGpu(next.systemStats?.devices);
+      const vramLabel = gpu
+        ? `VRAM ${gpu.vramUsedGiB.toFixed(1)}/${gpu.vramTotalGiB.toFixed(1)} GiB (${gpu.vramPercent}%)`
+        : undefined;
+      const statusLabel = next.online
+        ? next.queue.runningCount > 0
+          ? `Generating (:${activeComfyPort})`
+          : `ComfyUI Online (:${activeComfyPort})`
+        : 'ComfyUI Offline';
+      void nativeSyncTrayStatus(statusLabel, vramLabel);
+    };
+
+    void pollTelemetry();
+    const intervalMs =
+      isComfyTelemetryOnline || comfyProcessStatus === 'running' || comfyProcessStatus === 'starting'
+        ? 2500
+        : 7500;
+    const timer = setInterval(() => void pollTelemetry(), intervalMs);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [isClient, activeComfyPort, isComfyTelemetryOnline, comfyProcessStatus]);
+
+  // Connect directly to ComfyUI WebSocket (ws://127.0.0.1:<port>/ws) when ComfyUI is online
+  useEffect(() => {
+    if (!isClient || !isComfyTelemetryOnline) {
+      return;
+    }
+
+    let ws: WebSocket | null = null;
+    let closed = false;
+
+    try {
+      ws = new WebSocket(`ws://127.0.0.1:${activeComfyPort}/ws?clientId=sentinel-ui`);
+      ws.onopen = () => {
+        if (closed) return;
+        setComfyWsState((prev) => ({ ...prev, wsConnected: true }));
+      };
+      ws.onmessage = (event) => {
+        if (closed || typeof event.data !== 'string') return;
+        setComfyWsState((prev) => applyComfyWsMessage(prev, event.data).next);
+      };
+      ws.onerror = () => {
+        if (closed) return;
+        setComfyWsState((prev) => ({ ...prev, wsConnected: false }));
+      };
+      ws.onclose = () => {
+        if (closed) return;
+        setComfyWsState({
+          wsConnected: false,
+          executingNode: null,
+          currentPromptId: null,
+          stepProgress: null,
+        });
+      };
+    } catch {
+      // Ignore WebSocket connection errors if ComfyUI is restarting
+    }
+
+    return () => {
+      closed = true;
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        ws.close();
+      }
+    };
+  }, [isClient, isComfyTelemetryOnline, activeComfyPort]);
+
+  const effectiveComfyWsState: ComfyWsProgressState = isComfyTelemetryOnline
+    ? comfyWsState
+    : {
+        wsConnected: false,
+        executingNode: null,
+        currentPromptId: null,
+        stepProgress: null,
+      };
 
   // Live environment & custom_nodes scanner on startup
   useEffect(() => {
@@ -1095,13 +1222,73 @@ export default function Home() {
   const handleStopComfyUI = () => void controlComfyProcess('stop');
   const handleRestartComfyUI = () => void controlComfyProcess('restart');
 
-  if (!isClient) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0b0f17] text-slate-400 font-mono text-xs">
-        Loading ComfyNode Sentinel...
-      </div>
-    );
-  }
+  const refreshComfyTelemetryNow = async () => {
+    const next = await fetchComfyTelemetry(activeComfyPort);
+    setComfyTelemetry(next);
+  };
+
+  const handleInterruptComfy = async () => {
+    const res = await sendComfyTelemetryAction({
+      port: activeComfyPort,
+      action: 'interrupt',
+    });
+    addLog({
+      timestamp: new Date().toLocaleTimeString(),
+      type: res.ok ? 'warn' : 'stderr',
+      text: `[ComfyUI Interrupt] ${res.message}`,
+    });
+    pushToast(res.ok ? 'warn' : 'error', 'ComfyUI Execution', res.message);
+    await refreshComfyTelemetryNow();
+  };
+
+  const handleClearComfyQueue = async () => {
+    const res = await sendComfyTelemetryAction({
+      port: activeComfyPort,
+      action: 'clear_queue',
+    });
+    addLog({
+      timestamp: new Date().toLocaleTimeString(),
+      type: res.ok ? 'info' : 'stderr',
+      text: `[ComfyUI Queue] ${res.message}`,
+    });
+    pushToast(res.ok ? 'info' : 'error', 'ComfyUI Queue', res.message);
+    await refreshComfyTelemetryNow();
+  };
+
+  const handleDeleteComfyQueueItem = async (promptId: string) => {
+    const res = await sendComfyTelemetryAction({
+      port: activeComfyPort,
+      action: 'delete_queue_item',
+      promptId,
+    });
+    addLog({
+      timestamp: new Date().toLocaleTimeString(),
+      type: res.ok ? 'info' : 'stderr',
+      text: `[ComfyUI Queue] ${res.message}`,
+    });
+    await refreshComfyTelemetryNow();
+  };
+
+  const handleFreeComfyVram = async (unloadModels = true) => {
+    const res = await sendComfyTelemetryAction({
+      port: activeComfyPort,
+      action: 'free_vram',
+      unloadModels,
+      freeMemory: true,
+    });
+    addLog({
+      timestamp: new Date().toLocaleTimeString(),
+      type: res.ok ? 'success' : 'stderr',
+      text: `[ComfyUI VRAM] ${res.message}`,
+    });
+    pushToast(res.ok ? 'success' : 'error', 'ComfyUI VRAM Recovery', res.message);
+    await refreshComfyTelemetryNow();
+  };
+
+  const handleOpenTelemetryDrawer = () => {
+    setConsoleDrawerTab('telemetry');
+    setIsConsoleDrawerOpen(true);
+  };
 
   const updatesCount = nodes.filter((n) => n.hasUpdate).length;
   const healthIssuesCount = nodes.filter((n) => n.healthStatus !== 'compliant').length;
@@ -1124,7 +1311,12 @@ export default function Home() {
         onRestartComfyUI={handleRestartComfyUI}
         comfyProcessStatus={comfyProcessStatus}
         comfyProcessPid={comfyProcessPid}
-        comfyPort={settings.comfyPort || 8188}
+        comfyPort={activeComfyPort}
+        comfyTelemetry={comfyTelemetry}
+        comfyWsState={effectiveComfyWsState}
+        onInterruptComfy={() => void handleInterruptComfy()}
+        onFreeComfyVram={() => void handleFreeComfyVram(true)}
+        onOpenTelemetryDrawer={handleOpenTelemetryDrawer}
         instances={instances}
         activeInstanceId={activeInstanceId}
         onSwitchInstance={handleSwitchInstance}
@@ -1295,11 +1487,22 @@ export default function Home() {
         </main>
       </div>
 
-      {/* Collapsible Console Quick-Peek Drawer */}
+      {/* Collapsible Console & Live GPU Telemetry Drawer */}
       <ConsoleDrawer
         isOpen={isConsoleDrawerOpen}
+        activeDrawerTab={consoleDrawerTab}
+        onChangeDrawerTab={setConsoleDrawerTab}
         logs={logs}
         pipQueue={pipQueue}
+        comfyTelemetry={comfyTelemetry}
+        comfyWsState={effectiveComfyWsState}
+        comfyPort={activeComfyPort}
+        isValidRoot={settings.isValidRoot}
+        onLaunchComfyUI={handleLaunchComfyUI}
+        onInterruptComfy={() => void handleInterruptComfy()}
+        onClearComfyQueue={() => void handleClearComfyQueue()}
+        onDeleteComfyQueueItem={(id) => void handleDeleteComfyQueueItem(id)}
+        onFreeComfyVram={(unloadModels) => void handleFreeComfyVram(unloadModels)}
         onClose={() => setIsConsoleDrawerOpen(false)}
         onExpandToFullTab={() => {
           setIsConsoleDrawerOpen(false);
@@ -1320,8 +1523,11 @@ export default function Home() {
         comfyRoot={settings.comfyRoot}
         pipQueue={pipQueue}
         isTauri={isTauriEnvironment()}
+        comfyTelemetry={comfyTelemetry}
+        comfyPort={activeComfyPort}
         onNavigateToSettings={() => setActiveTab('settings')}
         onNavigateToRunner={() => setActiveTab('runner')}
+        onOpenTelemetryDrawer={handleOpenTelemetryDrawer}
       />
     </div>
   );

@@ -44,8 +44,31 @@ console.log('[prepare-desktop] Cleaning previous build artifacts...');
 fs.rmSync(nextDir, { recursive: true, force: true });
 fs.rmSync(destDir, { recursive: true, force: true });
 
+// Remove any orphaned legacy files if the project archive was extracted over an older checkout
+const legacyFiles = [
+  'components/ExportModal.tsx',
+  'components/views/RoadmapView.tsx',
+  'components/views/DocsView.tsx',
+  'lib/issue-exporter.ts',
+  'lib/utils.ts',
+  'tests/issue-exporter.test.ts',
+  'hooks/use-mobile.ts',
+  '.eslintrc.json',
+];
+for (const relPath of legacyFiles) {
+  const fullPath = path.join(root, relPath);
+  if (fs.existsSync(fullPath)) {
+    fs.rmSync(fullPath, { force: true });
+    console.log(`[prepare-desktop] Removed stale legacy file: ${relPath}`);
+  }
+}
+
 console.log('[prepare-desktop] Running Next.js standalone build...');
-execSync('npm run build', { stdio: 'inherit', cwd: root });
+execSync('npm run build', {
+  stdio: 'inherit',
+  cwd: root,
+  env: { ...process.env, NODE_ENV: 'production' },
+});
 
 if (!fs.existsSync(standaloneSrc)) {
   throw new Error(`Missing .next/standalone at ${standaloneSrc}`);

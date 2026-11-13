@@ -12,10 +12,66 @@ use tauri::Manager;
 
 struct StandaloneServer(Mutex<Option<Child>>);
 struct MinimizeToTrayState(AtomicBool);
+struct TrayHandleState(Mutex<Option<tauri::tray::TrayIcon>>);
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopRuntimeInfo {
+    pub os: String,
+    pub arch: String,
+    pub has_bundled_node: bool,
+    pub bundled_node_path: Option<String>,
+    pub has_standalone_server: bool,
+}
 
 #[tauri::command]
 fn set_minimize_to_tray(state: tauri::State<'_, MinimizeToTrayState>, enabled: bool) {
     state.0.store(enabled, Ordering::Relaxed);
+}
+
+#[tauri::command]
+fn sync_tray_status(
+    state: tauri::State<'_, TrayHandleState>,
+    status_label: String,
+    vram_summary: Option<String>,
+) -> Result<(), String> {
+    let guard = state.0.lock().map_err(|e| e.to_string())?;
+    if let Some(ref tray) = *guard {
+        let tooltip = match vram_summary {
+            Some(ref vram) if !vram.is_empty() => {
+                format!("ComfyNode Sentinel — {} • {}", status_label, vram)
+            }
+            _ => format!("ComfyNode Sentinel — {}", status_label),
+        };
+        tray.set_tooltip(Some(&tooltip)).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_desktop_runtime_info(app: tauri::AppHandle) -> Result<DesktopRuntimeInfo, String> {
+    let bundled_node = std::env::current_exe()
+        .ok()
+        .and_then(|exe| {
+            exe.parent()
+                .map(|p| p.join(if cfg!(windows) { "node.exe" } else { "node" }))
+        })
+        .filter(|p| p.exists());
+
+    let has_standalone_server = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|dir| dir.join("standalone-server").join("server.js").exists())
+        .unwrap_or(false);
+
+    Ok(DesktopRuntimeInfo {
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        has_bundled_node: bundled_node.is_some(),
+        bundled_node_path: bundled_node.map(|p| p.to_string_lossy().to_string()),
+        has_standalone_server,
+    })
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -179,6 +235,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(StandaloneServer(Mutex::new(None)))
         .manage(MinimizeToTrayState(AtomicBool::new(false)))
+        .manage(TrayHandleState(Mutex::new(None)))
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let minimize = window
@@ -240,7 +297,12 @@ pub fn run() {
             if let Some(icon) = app.default_window_icon() {
                 tray_builder = tray_builder.icon(icon.clone());
             }
-            let _ = tray_builder.build(app)?;
+            let tray_icon = tray_builder.build(app)?;
+            if let Some(tray_state) = app.try_state::<TrayHandleState>() {
+                if let Ok(mut guard) = tray_state.0.lock() {
+                    *guard = Some(tray_icon);
+                }
+            }
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -312,7 +374,9 @@ pub fn run() {
             toggle_node_state,
             quarantine_node_to_trash,
             scan_custom_nodes,
-            set_minimize_to_tray
+            set_minimize_to_tray,
+            sync_tray_status,
+            get_desktop_runtime_info
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
