@@ -155,4 +155,5 @@ export const DEFAULT_SETTINGS: EnvironmentSettings = {
   hasCustomNodes: false,
   showCleanNames: true,
   autoTorchShield: true,
+  minimizeToTray: true,
 };

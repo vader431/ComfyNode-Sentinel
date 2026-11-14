@@ -9,9 +9,11 @@ use std::time::Duration;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager};
+use tauri_plugin_dialog::DialogExt;
 
 struct StandaloneServer(Mutex<Option<Child>>);
 struct MinimizeToTrayState(AtomicBool);
+struct ExplicitQuitState(AtomicBool);
 struct TrayHandleState(Mutex<Option<tauri::tray::TrayIcon>>);
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -27,6 +29,42 @@ pub struct DesktopRuntimeInfo {
 #[tauri::command]
 fn set_minimize_to_tray(state: tauri::State<'_, MinimizeToTrayState>, enabled: bool) {
     state.0.store(enabled, Ordering::Relaxed);
+}
+
+#[tauri::command]
+async fn pick_directory(
+    app: tauri::AppHandle,
+    title: Option<String>,
+) -> Result<Option<String>, String> {
+    let dialog_title = title.unwrap_or_else(|| "Select ComfyUI Root Directory".to_string());
+    let picked = tokio::task::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title(&dialog_title)
+            .blocking_pick_folder()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(picked.map(|f| f.to_string()))
+}
+
+#[tauri::command]
+async fn pick_file(
+    app: tauri::AppHandle,
+    title: Option<String>,
+) -> Result<Option<String>, String> {
+    let dialog_title = title.unwrap_or_else(|| "Select Python Executable".to_string());
+    let picked = tokio::task::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title(&dialog_title)
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(picked.map(|f| f.to_string()))
 }
 
 #[tauri::command]
@@ -234,16 +272,22 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(StandaloneServer(Mutex::new(None)))
-        .manage(MinimizeToTrayState(AtomicBool::new(false)))
+        .manage(MinimizeToTrayState(AtomicBool::new(true)))
+        .manage(ExplicitQuitState(AtomicBool::new(false)))
         .manage(TrayHandleState(Mutex::new(None)))
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let explicit_quit = window
+                    .app_handle()
+                    .try_state::<ExplicitQuitState>()
+                    .map(|s| s.0.load(Ordering::Relaxed))
+                    .unwrap_or(false);
                 let minimize = window
                     .app_handle()
                     .try_state::<MinimizeToTrayState>()
                     .map(|s| s.0.load(Ordering::Relaxed))
-                    .unwrap_or(false);
-                if minimize {
+                    .unwrap_or(true);
+                if !explicit_quit && minimize {
                     api.prevent_close();
                     let _ = window.hide();
                 }
@@ -263,6 +307,7 @@ pub fn run() {
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => {
                         if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.unminimize();
                             let _ = win.show();
                             let _ = win.set_focus();
                         }
@@ -276,9 +321,24 @@ pub fn run() {
                         let _ = app.emit("tray-toggle-comfy", ());
                     }
                     "check_updates" => {
+                        if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.unminimize();
+                            let _ = win.show();
+                            let _ = win.set_focus();
+                        }
                         let _ = app.emit("tray-check-updates", ());
                     }
                     "quit" => {
+                        if let Some(quit_state) = app.try_state::<ExplicitQuitState>() {
+                            quit_state.0.store(true, Ordering::Relaxed);
+                        }
+                        if let Some(state) = app.try_state::<StandaloneServer>() {
+                            if let Ok(mut guard) = state.0.lock() {
+                                if let Some(mut child) = guard.take() {
+                                    let _ = child.kill();
+                                }
+                            }
+                        }
                         app.exit(0);
                     }
                     _ => {}
@@ -292,9 +352,10 @@ pub fn run() {
                     {
                         let app = tray.app_handle();
                         if let Some(win) = app.get_webview_window("main") {
-                            if win.is_visible().unwrap_or(false) {
+                            if win.is_visible().unwrap_or(false) && !win.is_minimized().unwrap_or(false) {
                                 let _ = win.hide();
                             } else {
+                                let _ = win.unminimize();
                                 let _ = win.show();
                                 let _ = win.set_focus();
                             }
@@ -384,13 +445,28 @@ pub fn run() {
             scan_custom_nodes,
             set_minimize_to_tray,
             sync_tray_status,
-            get_desktop_runtime_info
+            get_desktop_runtime_info,
+            pick_directory,
+            pick_file
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|app_handle, event| {
-        if let tauri::RunEvent::Exit = event {
+    app.run(|app_handle, event| match event {
+        tauri::RunEvent::ExitRequested { api, code, .. } => {
+            let explicit_quit = app_handle
+                .try_state::<ExplicitQuitState>()
+                .map(|s| s.0.load(Ordering::Relaxed))
+                .unwrap_or(false);
+            let minimize = app_handle
+                .try_state::<MinimizeToTrayState>()
+                .map(|s| s.0.load(Ordering::Relaxed))
+                .unwrap_or(true);
+            if !explicit_quit && code.is_none() && minimize {
+                api.prevent_exit();
+            }
+        }
+        tauri::RunEvent::Exit => {
             if let Some(state) = app_handle.try_state::<StandaloneServer>() {
                 if let Ok(mut guard) = state.0.lock() {
                     if let Some(mut child) = guard.take() {
@@ -399,6 +475,7 @@ pub fn run() {
                 }
             }
         }
+        _ => {}
     });
 }
 

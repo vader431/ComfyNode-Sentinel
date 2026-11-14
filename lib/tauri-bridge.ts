@@ -224,37 +224,79 @@ export interface NativeDiscoveredNode {
 }
 
 /**
- * Native OS directory picker (desktop only)
+ * Native OS directory picker (Tauri dialog plugin -> Tauri command -> host API fallback)
  */
 export async function nativePickDirectory(title = 'Select ComfyUI Folder'): Promise<string | null> {
-  if (!isTauriEnvironment()) return null;
+  if (isTauriEnvironment()) {
+    try {
+      const selected = await openDialog({
+        directory: true,
+        multiple: false,
+        title,
+      });
+      if (typeof selected === 'string') return selected;
+      if (selected === null) return null;
+    } catch (err) {
+      console.warn('Tauri plugin-dialog open failed, trying pick_directory command:', err);
+      try {
+        const picked = await invoke<string | null>('pick_directory', { title });
+        if (typeof picked === 'string' || picked === null) return picked;
+      } catch (cmdErr) {
+        console.warn('Tauri pick_directory command failed, falling back to host API:', cmdErr);
+      }
+    }
+  }
+
   try {
-    const selected = await openDialog({
-      directory: true,
-      multiple: false,
-      title,
+    const res = await fetch('/api/environment/pick', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'directory', title }),
     });
-    return typeof selected === 'string' ? selected : null;
+    if (!res.ok) return null;
+    const data = (await res.json()) as { path?: string | null };
+    return typeof data.path === 'string' && data.path.trim() ? data.path.trim() : null;
   } catch (err) {
-    console.error('Tauri directory dialog error:', err);
+    console.error('Directory picker error:', err);
     return null;
   }
 }
 
 /**
- * Native OS file picker (desktop only)
+ * Native OS file picker (Tauri dialog plugin -> Tauri command -> host API fallback)
  */
 export async function nativePickFile(title = 'Select Python Executable'): Promise<string | null> {
-  if (!isTauriEnvironment()) return null;
+  if (isTauriEnvironment()) {
+    try {
+      const selected = await openDialog({
+        directory: false,
+        multiple: false,
+        title,
+      });
+      if (typeof selected === 'string') return selected;
+      if (selected === null) return null;
+    } catch (err) {
+      console.warn('Tauri plugin-dialog open failed, trying pick_file command:', err);
+      try {
+        const picked = await invoke<string | null>('pick_file', { title });
+        if (typeof picked === 'string' || picked === null) return picked;
+      } catch (cmdErr) {
+        console.warn('Tauri pick_file command failed, falling back to host API:', cmdErr);
+      }
+    }
+  }
+
   try {
-    const selected = await openDialog({
-      directory: false,
-      multiple: false,
-      title,
+    const res = await fetch('/api/environment/pick', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'file', title }),
     });
-    return typeof selected === 'string' ? selected : null;
+    if (!res.ok) return null;
+    const data = (await res.json()) as { path?: string | null };
+    return typeof data.path === 'string' && data.path.trim() ? data.path.trim() : null;
   } catch (err) {
-    console.error('Tauri file dialog error:', err);
+    console.error('File picker error:', err);
     return null;
   }
 }

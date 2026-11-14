@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { FolderOpen, CheckCircle2, AlertCircle, Sparkles, ArrowRight } from 'lucide-react';
 import { EnvironmentSettings } from '@/types';
 import { checkEnvironmentReal } from '@/lib/system-client';
-import { isTauriEnvironment, nativePickDirectory } from '@/lib/tauri-bridge';
+import { nativePickDirectory } from '@/lib/tauri-bridge';
 
 interface OnboardingCardProps {
   settings: EnvironmentSettings;
@@ -26,6 +26,7 @@ export function OnboardingCard({
 }: OnboardingCardProps) {
   const [rootPath, setRootPath] = useState(settings.comfyRoot || '');
   const [isChecking, setIsChecking] = useState(false);
+  const [isBrowsing, setIsBrowsing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const handleConnect = async (e: React.FormEvent) => {
@@ -88,19 +89,26 @@ export function OnboardingCard({
               placeholder="C:\AI\ComfyUI_windows_portable\ComfyUI"
               className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 font-mono"
             />
-            {isTauriEnvironment() && (
-              <button
-                type="button"
-                onClick={async () => {
+            <button
+              type="button"
+              disabled={isBrowsing || isChecking}
+              onClick={async () => {
+                setIsBrowsing(true);
+                try {
                   const picked = await nativePickDirectory('Select ComfyUI Root Directory');
-                  if (picked) setRootPath(picked);
-                }}
-                className="flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors shrink-0"
-              >
-                <FolderOpen className="w-4 h-4 text-indigo-400" />
-                <span>Browse…</span>
-              </button>
-            )}
+                  if (picked) {
+                    setRootPath(picked);
+                    setErrorMsg(null);
+                  }
+                } finally {
+                  setIsBrowsing(false);
+                }
+              }}
+              className="flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 border border-slate-700 transition-colors shrink-0"
+            >
+              <FolderOpen className="w-4 h-4 text-indigo-400" />
+              <span>{isBrowsing ? 'Browsing…' : 'Browse…'}</span>
+            </button>
             <button
               type="submit"
               disabled={isChecking || !rootPath.trim()}

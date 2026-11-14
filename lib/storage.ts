@@ -71,7 +71,10 @@ export const StorageService = {
   getActiveProfileId: (): string => getStoredItem(STORAGE_KEYS.ACTIVE_PROFILE, ''),
   setActiveProfileId: (id: string): void => setStoredItem(STORAGE_KEYS.ACTIVE_PROFILE, id),
 
-  getSettings: (): EnvironmentSettings => getStoredItem(STORAGE_KEYS.SETTINGS, DEFAULT_SETTINGS),
+  getSettings: (): EnvironmentSettings => ({
+    ...DEFAULT_SETTINGS,
+    ...getStoredItem(STORAGE_KEYS.SETTINGS, DEFAULT_SETTINGS),
+  }),
   setSettings: (settings: EnvironmentSettings): void => setStoredItem(STORAGE_KEYS.SETTINGS, settings),
 
   getAliases: (): Record<string, string> => getStoredItem(STORAGE_KEYS.ALIASES, {}),

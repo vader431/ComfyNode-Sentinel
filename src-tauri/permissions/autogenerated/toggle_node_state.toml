@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-toggle-node-state"
+description = "Enables the toggle_node_state command without any pre-configured scope."
+commands.allow = ["toggle_node_state"]
+
+[[permission]]
+identifier = "deny-toggle-node-state"
+description = "Denies the toggle_node_state command without any pre-configured scope."
+commands.deny = ["toggle_node_state"]

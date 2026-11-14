@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-scan-custom-nodes"
+description = "Enables the scan_custom_nodes command without any pre-configured scope."
+commands.allow = ["scan_custom_nodes"]
+
+[[permission]]
+identifier = "deny-scan-custom-nodes"
+description = "Denies the scan_custom_nodes command without any pre-configured scope."
+commands.deny = ["scan_custom_nodes"]

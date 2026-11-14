@@ -230,7 +230,7 @@ function SentinelWorkspace() {
   // Sync minimize-to-tray preference with Tauri shell on startup
   useEffect(() => {
     if (!isClient) return;
-    void nativeSetMinimizeToTray(Boolean(settings.minimizeToTray));
+    void nativeSetMinimizeToTray(settings.minimizeToTray ?? true);
   }, [isClient, settings.minimizeToTray]);
 
   // Listen to Tauri system tray context menu events
