@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 struct StandaloneServer(Mutex<Option<Child>>);
 struct MinimizeToTrayState(AtomicBool);

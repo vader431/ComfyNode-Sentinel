@@ -21,15 +21,26 @@ export function resolveSafeSubpath(baseDir: string, ...segments: string[]): stri
 }
 
 /**
+ * Reads the runtime OS user home directory without allowing @vercel/nft
+ * to statically inline the build machine's home directory into a wildcard glob.
+ */
+function getRuntimeHomeDir(): string {
+  const envHome = process.env.HOME || process.env.USERPROFILE;
+  if (envHome) return envHome;
+  const method = ['home', 'dir'].join('') as 'homedir';
+  return os[method]();
+}
+
+/**
  * Expands leading "~" to the current OS user's home directory.
  */
 export function expandHomeDir(inputPath: string): string {
   const trimmed = inputPath.trim();
   if (trimmed === '~') {
-    return os.homedir();
+    return getRuntimeHomeDir();
   }
   if (trimmed.startsWith('~/') || trimmed.startsWith('~\\')) {
-    return path.join(os.homedir(), trimmed.slice(2));
+    return path.join(getRuntimeHomeDir(), trimmed.slice(2));
   }
   return trimmed;
 }
@@ -43,7 +54,7 @@ export function detectHostComfyCandidates(): {
   presetPaths: string[];
   detectedPaths: string[];
 } {
-  const home = os.homedir();
+  const home = getRuntimeHomeDir();
   const isWin = process.platform === 'win32';
   const presetPaths = isWin
     ? [
