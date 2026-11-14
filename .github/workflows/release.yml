@@ -50,9 +50,80 @@ jobs:
       - name: Verify Next.js build
         run: npm run build
 
+  create-release:
+    name: Create Draft GitHub Release & Web Bundle
+    needs: verify
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.meta.outputs.tag_name }}
+      version: ${{ steps.meta.outputs.version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f bun.lock ]; then
+            npx --yes bun install --frozen-lockfile
+          else
+            npm install --no-audit
+          fi
+
+      - name: Resolve version and extract changelog notes
+        id: meta
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="v${VERSION}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag_name=${TAG}" >> "$GITHUB_OUTPUT"
+          node scripts/extract-release-notes.mjs "${TAG}" RELEASE_NOTES.md
+
+      - name: Build & archive standalone web server
+        run: |
+          npm run build
+          mkdir -p dist-web
+          cp -r .next/standalone/. dist-web/
+          mkdir -p dist-web/.next
+          cp -r .next/static dist-web/.next/static
+          if [ -d public ]; then cp -r public dist-web/public; fi
+          tar -czf "comfynode-sentinel-web-${{ steps.meta.outputs.tag_name }}.tar.gz" -C dist-web .
+
+      - name: Create or update draft GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.meta.outputs.tag_name }}"
+          WEB_ARCHIVE="comfynode-sentinel-web-${TAG}.tar.gz"
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release edit "${TAG}" \
+              --draft \
+              --title "ComfyNode Sentinel ${TAG}" \
+              --notes-file RELEASE_NOTES.md
+            gh release upload "${TAG}" "${WEB_ARCHIVE}" --clobber
+          else
+            gh release create "${TAG}" "${WEB_ARCHIVE}" \
+              --draft \
+              --target "${GITHUB_SHA}" \
+              --title "ComfyNode Sentinel ${TAG}" \
+              --notes-file RELEASE_NOTES.md
+          fi
+
   build-tauri:
     name: Build Tauri Bundles (${{ matrix.target }})
-    needs: verify
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
@@ -120,6 +191,10 @@ jobs:
             npm install --no-audit
           fi
 
+      - name: Extract release notes
+        shell: bash
+        run: node scripts/extract-release-notes.mjs "${{ needs.create-release.outputs.tag_name }}" RELEASE_NOTES.md
+
       - name: Build Tauri desktop bundles
         uses: tauri-apps/tauri-action@v0
         env:
@@ -129,9 +204,46 @@ jobs:
         with:
           # bun.lock makes tauri-action auto-pick bun (not installed); force the npm-installed CLI
           tauriScript: npx tauri
-          tagName: v__VERSION__
-          releaseName: 'ComfyNode Sentinel v__VERSION__'
-          releaseBody: 'See CHANGELOG.md for release notes.'
+          tagName: ${{ needs.create-release.outputs.tag_name }}
+          releaseName: 'ComfyNode Sentinel ${{ needs.create-release.outputs.tag_name }}'
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }}
+
+  publish-release:
+    name: Finalize Checksums & Publish GitHub Release
+    needs:
+      - create-release
+      - build-tauri
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Generate SHA256SUMS.txt and publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.create-release.outputs.tag_name }}"
+          node scripts/extract-release-notes.mjs "${TAG}" RELEASE_NOTES.md
+
+          mkdir -p release-assets
+          gh release download "${TAG}" --dir release-assets --clobber
+          (
+            cd release-assets
+            rm -f SHA256SUMS.txt
+            sha256sum * > SHA256SUMS.txt
+          )
+          gh release upload "${TAG}" release-assets/SHA256SUMS.txt --clobber
+
+          gh release edit "${TAG}" \
+            --draft=false \
+            --latest \
+            --title "ComfyNode Sentinel ${TAG}" \
+            --notes-file RELEASE_NOTES.md
