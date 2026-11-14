@@ -30,6 +30,7 @@ import {
   nativePickFile,
   nativeSetMinimizeToTray,
 } from '@/lib/tauri-bridge';
+import { AppUpdaterModal } from '@/components/AppUpdaterModal';
 import pkg from '../../package.json';
 
 interface SettingsViewProps {
@@ -68,6 +69,7 @@ export function SettingsView({
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
   const [desktopInfo, setDesktopInfo] = useState<DesktopRuntimeInfo | null>(null);
+  const [isUpdaterModalOpen, setIsUpdaterModalOpen] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -484,9 +486,19 @@ export function SettingsView({
             </div>
 
             {!updateStatus ? (
-              <p className="text-[11px] text-slate-400 leading-relaxed">
-                Checks Tauri signed update manifest and GitHub Releases for platform installers (<code>.msi</code>, <code>.exe</code>, <code>.dmg</code>, <code>.AppImage</code>).
-              </p>
+              <div className="space-y-2">
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Checks Tauri signed update manifest and GitHub Releases for platform installers (<code>.msi</code>, <code>.exe</code>, <code>.dmg</code>, <code>.AppImage</code>).
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setIsUpdaterModalOpen(true)}
+                  className="w-full py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Open Release &amp; Updater Modal</span>
+                </button>
+              </div>
             ) : updateStatus.error ? (
               <div className="text-[11px] font-mono text-rose-400 p-2.5 rounded-lg bg-rose-950/30 border border-rose-800/50">
                 {updateStatus.error}
@@ -689,6 +701,7 @@ export function SettingsView({
           </div>
         </div>
       </div>
+      <AppUpdaterModal isOpen={isUpdaterModalOpen} onClose={() => setIsUpdaterModalOpen(false)} />
     </div>
   );
 }

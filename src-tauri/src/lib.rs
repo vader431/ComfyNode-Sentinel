@@ -252,12 +252,14 @@ pub fn run() {
         .setup(|app| {
             let show_i = MenuItem::with_id(app, "show", "Show ComfyNode Sentinel", true, None::<&str>)?;
             let hide_i = MenuItem::with_id(app, "hide", "Hide to Tray", true, None::<&str>)?;
-            let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_i, &hide_i, &quit_i])?;
+            let toggle_comfy_i = MenuItem::with_id(app, "toggle_comfy", "Toggle ComfyUI (Start/Stop)", true, None::<&str>)?;
+            let check_updates_i = MenuItem::with_id(app, "check_updates", "Check for Updates", true, None::<&str>)?;
+            let quit_i = MenuItem::with_id(app, "quit", "Quit ComfyNode Sentinel", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show_i, &hide_i, &toggle_comfy_i, &check_updates_i, &quit_i])?;
 
             let mut tray_builder = TrayIconBuilder::new()
                 .menu(&menu)
-                .tooltip("ComfyNode Sentinel")
+                .tooltip("ComfyNode Sentinel — Idle")
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => {
                         if let Some(win) = app.get_webview_window("main") {
@@ -269,6 +271,12 @@ pub fn run() {
                         if let Some(win) = app.get_webview_window("main") {
                             let _ = win.hide();
                         }
+                    }
+                    "toggle_comfy" => {
+                        let _ = app.emit("tray-toggle-comfy", ());
+                    }
+                    "check_updates" => {
+                        let _ = app.emit("tray-check-updates", ());
                     }
                     "quit" => {
                         app.exit(0);
