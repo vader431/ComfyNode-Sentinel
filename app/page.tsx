@@ -233,6 +233,48 @@ function SentinelWorkspace() {
     void nativeSetMinimizeToTray(Boolean(settings.minimizeToTray));
   }, [isClient, settings.minimizeToTray]);
 
+  // Listen to Tauri system tray context menu events
+  useEffect(() => {
+    if (!isTauriEnvironment()) return;
+    let unlistenToggle: (() => void) | undefined;
+    let unlistenUpdates: (() => void) | undefined;
+
+    import('@tauri-apps/api/event').then(({ listen }) => {
+      listen('tray-toggle-comfy', async () => {
+        const port = settings.comfyPort || 8188;
+        const isRunning = comfyProcessStatus === 'running' || comfyProcessStatus === 'starting';
+        const action = isRunning ? 'stop' : 'start';
+        try {
+          await fetch('/api/comfy/process', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action,
+              comfyRoot: settings.comfyRoot,
+              pythonBinary: settings.pythonBinary || 'python',
+              port,
+            }),
+          });
+        } catch {
+          // ignore
+        }
+      }).then((fn) => {
+        unlistenToggle = fn;
+      });
+
+      listen('tray-check-updates', () => {
+        setActiveTab('settings');
+      }).then((fn) => {
+        unlistenUpdates = fn;
+      });
+    });
+
+    return () => {
+      unlistenToggle?.();
+      unlistenUpdates?.();
+    };
+  }, [comfyProcessStatus, settings.comfyRoot, settings.pythonBinary, settings.comfyPort]);
+
   // Sync ComfyUI managed process status & tail logs
   useEffect(() => {
     if (!isClient) return;
