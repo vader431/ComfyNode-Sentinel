@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::net::{TcpListener, TcpStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -15,6 +15,23 @@ struct StandaloneServer(Mutex<Option<Child>>);
 struct MinimizeToTrayState(AtomicBool);
 struct ExplicitQuitState(AtomicBool);
 struct TrayHandleState(Mutex<Option<tauri::tray::TrayIcon>>);
+
+/// Strips the Windows `\\?\` verbatim path prefix returned by `std::fs::canonicalize`
+/// / `app.path().resource_dir()`, which causes Node.js `realpathSync` to fail with
+/// `EISDIR: illegal operation on a directory, lstat 'C:'`.
+fn strip_windows_verbatim_prefix(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let raw = path.to_string_lossy();
+        if let Some(unc) = raw.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{}", unc));
+        }
+        if let Some(stripped) = raw.strip_prefix(r"\\?\") {
+            return PathBuf::from(stripped);
+        }
+    }
+    path.to_path_buf()
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -385,20 +402,26 @@ pub fn run() {
                     .map(|a| a.port())
                     .unwrap_or(3188);
 
-                if let Ok(resource_dir) = app.path().resource_dir() {
+                if let Ok(raw_resource_dir) = app.path().resource_dir() {
+                    let resource_dir = strip_windows_verbatim_prefix(&raw_resource_dir);
                     let server_dir = resource_dir.join("standalone-server");
                     let server_js = server_dir.join("server.js");
                     if server_js.exists() {
                         let bundled_node = std::env::current_exe()
                             .ok()
-                            .and_then(|exe| exe.parent().map(|p| p.join(if cfg!(windows) { "node.exe" } else { "node" })))
+                            .and_then(|exe| {
+                                let clean_exe = strip_windows_verbatim_prefix(&exe);
+                                clean_exe
+                                    .parent()
+                                    .map(|p| p.join(if cfg!(windows) { "node.exe" } else { "node" }))
+                            })
                             .filter(|p| p.exists());
 
                         let mut cmd = match bundled_node {
                             Some(ref bin) => Command::new(bin),
                             None => Command::new("node"),
                         };
-                        cmd.arg(&server_js)
+                        cmd.arg("server.js")
                             .current_dir(&server_dir)
                             .env("PORT", port.to_string())
                             .env("HOSTNAME", "127.0.0.1");
@@ -420,7 +443,7 @@ pub fn run() {
                             let handle = app.handle().clone();
                             std::thread::spawn(move || {
                                 let addr = format!("127.0.0.1:{}", port);
-                                for _ in 0..40 {
+                                for _ in 0..120 {
                                     if TcpStream::connect(&addr).is_ok() {
                                         if let Some(win) = handle.get_webview_window("main") {
                                             if let Ok(url) = format!("http://{}/", addr).parse() {
@@ -515,5 +538,25 @@ mod tests {
 
         // Cleanup
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_strip_windows_verbatim_prefix() {
+        let normal = Path::new("C:\\Program Files\\ComfyNode Sentinel");
+        assert_eq!(strip_windows_verbatim_prefix(normal), normal);
+
+        #[cfg(windows)]
+        {
+            let verbatim = Path::new(r"\\?\C:\Program Files\ComfyNode Sentinel");
+            assert_eq!(
+                strip_windows_verbatim_prefix(verbatim),
+                Path::new(r"C:\Program Files\ComfyNode Sentinel")
+            );
+            let unc = Path::new(r"\\?\UNC\server\share\Sentinel");
+            assert_eq!(
+                strip_windows_verbatim_prefix(unc),
+                Path::new(r"\\server\share\Sentinel")
+            );
+        }
     }
 }
