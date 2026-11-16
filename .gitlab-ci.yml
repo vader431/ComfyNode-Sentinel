@@ -234,6 +234,13 @@ release:gitlab:
         set -- "$@" --assets-link="{\"name\":\"${filename}\",\"url\":\"${url}\",\"filepath\":\"/${filename}\",\"link_type\":\"package\"}"
       done
 
-      "$@"
+      HTTP_STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" \
+        --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases/${CI_COMMIT_TAG}")
+      if [ "${HTTP_STATUS}" = "200" ]; then
+        echo "Release ${CI_COMMIT_TAG} already exists on GitLab; packages uploaded to ${REGISTRY_BASE}/."
+      else
+        "$@"
+      fi
   rules:
     - if: $CI_COMMIT_TAG =~ /^v/
