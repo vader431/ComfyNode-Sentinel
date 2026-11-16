@@ -95,3 +95,13 @@
 ## Phase 10: Multi-Instance ComfyUI Manager
 - [x] **Multi-Instance ComfyUI Manager**: Register, name, and switch between multiple ComfyUI installations (with per-instance root, Python binary, and server port) via `Header` quick-switcher and `SettingsView`.
 
+---
+
+## Phase 11: Runtime Diagnostics, Frontend & Workflow Completeness
+- [x] **Crash & Traceback Doctor (`lib/crash-doctor.ts`)**: Auto-parse ComfyUI `IMPORT FAILED`, `ModuleNotFoundError`, `custom_nodes/<folder>` tracebacks, and CUDA OOM errors with 1-click pip module install and node disable actions.
+- [x] **Per-Instance Launch Flags & ComfyUI Core Updater (`/api/environment/core`)**: Configure CLI flags (`--lowvram`, `--highvram`, `--fast`, `--preview-method auto`, `--listen 0.0.0.0`, custom args) per instance and check/pull ComfyUI core Git updates.
+- [x] **Workflow Missing-Model Resolver**: Extract referenced checkpoints, LoRAs, ControlNets, VAEs, UNETs, and CLIPs from `.png` / `.json` workflows and cross-reference against local `models/`.
+- [x] **ComfyUI Frontend Version Manager (`Frontend` tab / `/api/env/frontend`)**: Inspect installed `comfyui-frontend-package`, browse PyPI releases, and 1-click install, update, or roll back.
+- [x] **Updates Tab & Browse Polish**: Preserve checked update states after updating a single node, add **Installed** badges on **Install & Browse** cards, and fix semver comparison in **Release & Updater**.
+
+

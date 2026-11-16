@@ -5,6 +5,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [0.5.1] - 2026-11-16
+
+### Fixed
+- **Release & Updater Version Check (`lib/tauri-bridge.ts`, `components/AppUpdaterModal.tsx`)**:
+  - Replaced string inequality (`latest !== currentVersion`) with semver comparison so newer local/pre-release builds are not falsely prompted to downgrade to an older GitHub Release.
+  - Added a **View Release on GitHub** fallback button in `AppUpdaterModal` when no OS-matched installer asset is attached.
+
+---
+
 ## [0.5.0] - 2026-11-16
 
 ### Added

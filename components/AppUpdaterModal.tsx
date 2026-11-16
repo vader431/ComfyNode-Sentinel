@@ -141,6 +141,15 @@ export function AppUpdaterModal({ isOpen, onClose }: AppUpdaterModalProps) {
                         {(updateStatus.matchedAsset.sizeBytes / (1024 * 1024)).toFixed(1)} MB
                       </span>
                     </a>
+                  ) : updateStatus.releaseUrl ? (
+                    <a
+                      href={updateStatus.releaseUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center justify-center w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md transition-colors"
+                    >
+                      View Release on GitHub
+                    </a>
                   ) : null}
                 </div>
               ) : (

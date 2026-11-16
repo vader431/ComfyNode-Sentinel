@@ -3,6 +3,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { check as checkTauriUpdate } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import type { DesktopReleaseAsset, DesktopRuntimeInfo } from '@/types';
+import { compareSemverDesc } from '@/lib/frontend-versions';
 
 /**
  * Returns true if running inside the Tauri v2 desktop webview shell.
@@ -184,7 +185,8 @@ export async function nativeCheckAppUpdate(currentVersion: string): Promise<AppU
 
     const matchedAsset = matchPlatformReleaseAsset(allAssets);
     const latest = (data.tag_name || '').replace(/^v/i, '');
-    const available = Boolean(latest && latest !== currentVersion);
+    const normalizedCurrent = currentVersion.replace(/^v/i, '');
+    const available = Boolean(latest && compareSemverDesc(normalizedCurrent, latest) > 0);
 
     return {
       available,
