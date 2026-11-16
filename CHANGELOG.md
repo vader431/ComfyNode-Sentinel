@@ -5,6 +5,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [0.5.0] - 2026-11-16
+
+### Added
+- **ComfyUI Frontend Version Manager (`Frontend` tab)**:
+  - Inspect the installed `comfyui-frontend-package` version, browse released PyPI versions, and 1-click install, update, or roll back to any release.
+- **Crash & Traceback Doctor (`lib/crash-doctor.ts`)**:
+  - Automatically parses ComfyUI startup/runtime logs (`IMPORT FAILED`, `ModuleNotFoundError`, `custom_nodes/<folder>` tracebacks, CUDA OOM) with 1-click pip module installation and node disabling.
+- **Per-Instance Launch Flags & ComfyUI Core Updater**:
+  - Configure CLI launch flags (`--lowvram`, `--highvram`, `--fast`, `--preview-method auto`, `--listen 0.0.0.0`, custom args) per ComfyUI instance, plus check and update ComfyUI core (`git pull --ff-only`) from Settings.
+- **Workflow Missing-Model Resolver**:
+  - Extract referenced checkpoints, LoRAs, ControlNets, VAEs, UNETs, and CLIPs from `.png` / `.json` workflows and cross-reference them against local `models/`.
+- **Workspace Rules & Skills**:
+  - Added `AGENTS.md` and `.agents/skills/` engineering and release runbooks.
+
+### Fixed
+- **Updates Tab Persistence**: Updating a single custom node no longer clears update badges for all other checked nodes during the post-update rescan.
+- **Install & Browse Cards**: Added an **Installed** pill badge and highlight border to installed node cards.
+
+---
+
 ## [0.4.0] - 2026-11-13
 
 ### Added

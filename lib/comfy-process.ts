@@ -116,10 +116,26 @@ export async function getComfyProcessStatus(sinceId = 0): Promise<ComfyProcessSn
   };
 }
 
+export function sanitizeLaunchArgs(launchArgs?: string[]): string[] {
+  if (!Array.isArray(launchArgs)) return [];
+  const tokens: string[] = [];
+  for (const raw of launchArgs) {
+    if (typeof raw !== 'string') continue;
+    const parts = raw.trim().split(/\s+/).filter(Boolean);
+    for (const part of parts) {
+      // Prevent shell metacharacters since shell: false is used
+      if (/[;&|`$<>]/.test(part)) continue;
+      tokens.push(part);
+    }
+  }
+  return tokens;
+}
+
 export async function startComfyProcess(
   comfyRoot: string,
   pythonBinary: string,
-  port = 8188
+  port = 8188,
+  launchArgs: string[] = []
 ): Promise<ComfyProcessSnapshot> {
   const state = getState();
   if (state.child && (state.status === 'starting' || state.status === 'running')) {
@@ -132,7 +148,15 @@ export async function startComfyProcess(
   }
 
   const py = pythonBinary?.trim() || 'python';
-  const args = ['main.py', '--listen', '127.0.0.1', '--port', String(port)];
+  const extraArgs = sanitizeLaunchArgs(launchArgs);
+  const hasCustomListen = extraArgs.some((a) => a === '--listen' || a.startsWith('--listen='));
+  const args = [
+    'main.py',
+    ...(hasCustomListen ? [] : ['--listen', '127.0.0.1']),
+    '--port',
+    String(port),
+    ...extraArgs.filter((a) => a !== '--port'),
+  ];
 
   state.logs = [];
   state.exitCode = null;
@@ -224,9 +248,10 @@ export async function stopComfyProcess(): Promise<ComfyProcessSnapshot> {
 export async function restartComfyProcess(
   comfyRoot: string,
   pythonBinary: string,
-  port = 8188
+  port = 8188,
+  launchArgs: string[] = []
 ): Promise<ComfyProcessSnapshot> {
   await stopComfyProcess();
-  return startComfyProcess(comfyRoot, pythonBinary, port);
+  return startComfyProcess(comfyRoot, pythonBinary, port, launchArgs);
 }
 

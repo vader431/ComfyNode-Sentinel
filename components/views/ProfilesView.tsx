@@ -19,14 +19,20 @@ import {
   WorkspaceProfile,
   InstalledNode,
   WorkflowInspectionResult,
+  WorkflowModelReference,
 } from '@/types';
-import { extractWorkflowFromBuffer, extractNodeTypesFromJson } from '@/lib/png-metadata';
+import {
+  extractWorkflowFromBuffer,
+  extractNodeTypesFromJson,
+  extractModelReferencesFromJson,
+} from '@/lib/png-metadata';
 import { COMMUNITY_REGISTRY } from '@/lib/default-data';
 
 interface ProfilesViewProps {
   profiles: WorkspaceProfile[];
   activeProfileId: string;
   installedNodes: InstalledNode[];
+  comfyRoot?: string;
   onSwitchProfile: (profileId: string) => void;
   onCreateProfile: (name: string, description: string) => void;
   onDeleteProfile?: (profileId: string) => void;
@@ -37,6 +43,7 @@ export function ProfilesView({
   profiles,
   activeProfileId,
   installedNodes,
+  comfyRoot,
   onSwitchProfile,
   onCreateProfile,
   onDeleteProfile,
@@ -79,7 +86,12 @@ export function ProfilesView({
         setPreviewImageUrl(null);
       }
       const extracted = await extractWorkflowFromBuffer(file);
-      analyzeWorkflowClasses(file.name, file.name.endsWith('.png') ? 'png' : 'json', extracted.nodeTypes);
+      await analyzeWorkflowClasses(
+        file.name,
+        file.name.endsWith('.png') ? 'png' : 'json',
+        extracted.nodeTypes,
+        extracted.modelReferences
+      );
     } catch (err: unknown) {
       setErrorMessage(err instanceof Error ? err.message : 'Error parsing workflow file.');
       setInspectionResult(null);
@@ -87,7 +99,12 @@ export function ProfilesView({
     }
   };
 
-  const analyzeWorkflowClasses = (fileName: string, fileType: 'png' | 'json', classNames: string[]) => {
+  const analyzeWorkflowClasses = async (
+    fileName: string,
+    fileType: 'png' | 'json',
+    classNames: string[],
+    modelRefs: WorkflowModelReference[] = []
+  ) => {
     const matchedNodes: WorkflowInspectionResult['matchedNodes'] = [];
     const missingNodes: WorkflowInspectionResult['missingNodes'] = [];
 
@@ -142,17 +159,48 @@ export function ProfilesView({
       }
     }
 
+    let resolvedModels: WorkflowModelReference[] = modelRefs;
+    if (modelRefs.length > 0 && comfyRoot) {
+      try {
+        const res = await fetch('/api/models/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ comfyRoot }),
+        });
+        if (res.ok) {
+          const data = (await res.json()) as { models?: Array<{ fileName?: string; relativePath?: string }> };
+          const localModels = data.models || [];
+          resolvedModels = modelRefs.map((m) => {
+            const base = m.fileName.split(/[\\/]/).pop()?.toLowerCase() || '';
+            const match = localModels.find(
+              (lm) =>
+                (lm.fileName && lm.fileName.toLowerCase() === base) ||
+                (lm.relativePath && lm.relativePath.toLowerCase().endsWith(base))
+            );
+            return {
+              ...m,
+              presentOnDisk: Boolean(match),
+              matchedPath: match?.relativePath,
+            };
+          });
+        }
+      } catch {
+        // Leave presentOnDisk undefined if model scan is unavailable
+      }
+    }
+
     setInspectionResult({
       fileName,
       fileType,
       extractedClasses: classNames,
       matchedNodes,
       missingNodes,
+      requiredModels: resolvedModels,
       totalNodesCount: classNames.length,
     });
   };
 
-  const handleInspectPastedJson = () => {
+  const handleInspectPastedJson = async () => {
     setErrorMessage(null);
     setPreviewImageUrl(null);
     try {
@@ -161,7 +209,8 @@ export function ProfilesView({
       if (classNames.length === 0) {
         throw new Error('No ComfyUI node classes ("type" or "class_type") found in the pasted JSON.');
       }
-      analyzeWorkflowClasses('pasted_workflow.json', 'json', classNames);
+      const modelRefs = extractModelReferencesFromJson(parsed);
+      await analyzeWorkflowClasses('pasted_workflow.json', 'json', classNames, modelRefs);
     } catch (err: unknown) {
       setErrorMessage(err instanceof Error ? err.message : 'Invalid ComfyUI workflow JSON.');
       setInspectionResult(null);
@@ -476,6 +525,54 @@ export function ProfilesView({
                     </table>
                   </div>
                 </div>
+
+                {/* Required Models Cross-Reference */}
+                {inspectionResult.requiredModels && inspectionResult.requiredModels.length > 0 && (
+                  <div className="mt-5">
+                    <h4 className="text-xs font-semibold text-slate-300 mb-2">
+                      Referenced Models ({inspectionResult.requiredModels.length})
+                    </h4>
+                    <div className="rounded-lg border border-slate-800 bg-slate-950/60 overflow-hidden">
+                      <table className="w-full text-left border-collapse text-xs font-mono">
+                        <thead className="bg-slate-900/60 text-[10px] text-slate-400">
+                          <tr>
+                            <th className="py-2 px-3">Model File</th>
+                            <th className="py-2 px-3">Type</th>
+                            <th className="py-2 px-3">Loader</th>
+                            <th className="py-2 px-3 text-right">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/60">
+                          {inspectionResult.requiredModels.map((model, idx) => (
+                            <tr key={`${model.modelType}-${model.fileName}-${idx}`} className="hover:bg-slate-900/40">
+                              <td className="py-2 px-3 text-slate-200 font-semibold break-all">
+                                {model.fileName}
+                              </td>
+                              <td className="py-2 px-3 text-slate-400">{model.modelType}</td>
+                              <td className="py-2 px-3 text-slate-500">{model.nodeClass}</td>
+                              <td className="py-2 px-3 text-right whitespace-nowrap">
+                                {model.presentOnDisk === true ? (
+                                  <span className="text-emerald-400 text-[11px]">✓ On Disk</span>
+                                ) : model.presentOnDisk === false ? (
+                                  <a
+                                    href={`https://huggingface.co/models?search=${encodeURIComponent(model.fileName.replace(/\.[^.]+$/, ''))}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-rose-400 hover:text-rose-300 underline text-[11px]"
+                                  >
+                                    Missing (Search HF)
+                                  </a>
+                                ) : (
+                                  <span className="text-slate-500 text-[11px]">Unchecked</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

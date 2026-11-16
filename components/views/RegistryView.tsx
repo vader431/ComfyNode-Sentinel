@@ -413,14 +413,26 @@ export function RegistryView({
           return (
             <div
               key={node.id}
-              className="flex flex-col justify-between rounded-xl border border-slate-800 bg-slate-900/60 p-5 hover:border-slate-700 transition-colors shadow-sm"
+              className={`flex flex-col justify-between rounded-xl border p-5 transition-colors shadow-sm ${
+                installed
+                  ? 'border-emerald-500/40 bg-emerald-950/10 hover:border-emerald-500/60'
+                  : 'border-slate-800 bg-slate-900/60 hover:border-slate-700'
+              }`}
             >
               <div>
                 <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <h3 className="text-sm font-semibold text-slate-100 hover:text-indigo-300 transition-colors">
-                      {node.name}
-                    </h3>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-sm font-semibold text-slate-100 hover:text-indigo-300 transition-colors">
+                        {node.name}
+                      </h3>
+                      {installed && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-[10px] font-mono font-semibold text-emerald-300">
+                          <CheckCircle2 className="w-3 h-3" />
+                          <span>Installed</span>
+                        </span>
+                      )}
+                    </div>
                     <div className="flex items-center gap-2 text-[11px] text-slate-500 font-mono mt-0.5">
                       <span>by @{node.author}</span>
                       <span aria-hidden="true">·</span>

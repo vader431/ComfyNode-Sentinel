@@ -83,6 +83,14 @@ export interface WorkspaceProfile {
   updatedAt: string;
 }
 
+export interface WorkflowModelReference {
+  fileName: string;
+  modelType: 'checkpoints' | 'loras' | 'controlnet' | 'vae' | 'upscale_models' | 'unet' | 'clip';
+  nodeClass: string;
+  presentOnDisk?: boolean;
+  matchedPath?: string;
+}
+
 export interface WorkflowInspectionResult {
   fileName: string;
   fileType: 'png' | 'json';
@@ -98,7 +106,18 @@ export interface WorkflowInspectionResult {
     className: string;
     suggestedRegistryNode?: RegistryNode;
   }[];
+  requiredModels?: WorkflowModelReference[];
   totalNodesCount: number;
+}
+
+export interface CrashDiagnostic {
+  id: string;
+  kind: 'missing_module' | 'import_failed' | 'cuda_oom' | 'node_traceback';
+  title: string;
+  detail: string;
+  nodeFolderName?: string;
+  missingModule?: string;
+  suggestedPipPackage?: string;
 }
 
 export interface TerminalLogEntry {
@@ -130,6 +149,7 @@ export interface EnvironmentSettings {
   autoTorchShield: boolean;
   comfyPort?: number;
   minimizeToTray?: boolean;
+  launchArgs?: string[];
 }
 
 export interface ComfyInstance {
@@ -139,6 +159,7 @@ export interface ComfyInstance {
   pythonBinary: string;
   pythonType: EnvironmentSettings['pythonType'];
   port: number;
+  launchArgs?: string[];
 }
 
 export interface DependencyRequirement {

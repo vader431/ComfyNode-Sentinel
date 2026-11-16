@@ -61,11 +61,23 @@ export function SettingsView({
   const [pythonBinaryInput, setPythonBinaryInput] = useState(settings.pythonBinary);
   const [pythonTypeInput, setPythonTypeInput] = useState(settings.pythonType);
   const [comfyPortInput, setComfyPortInput] = useState<number>(settings.comfyPort || 8188);
+  const [launchArgsInput, setLaunchArgsInput] = useState<string>((settings.launchArgs || []).join(' '));
   const [autoShield, setAutoShield] = useState(settings.autoTorchShield);
   const [cleanNames, setCleanNames] = useState(settings.showCleanNames);
   const [minimizeToTray, setMinimizeToTray] = useState(settings.minimizeToTray ?? true);
   const [isBrowsingRoot, setIsBrowsingRoot] = useState(false);
   const [isBrowsingPython, setIsBrowsingPython] = useState(false);
+  const [coreStatus, setCoreStatus] = useState<{
+    isGitRepo?: boolean;
+    branch?: string | null;
+    commit?: string | null;
+    behindCount?: number;
+    hasUpdate?: boolean;
+    message?: string;
+    error?: string;
+  } | null>(null);
+  const [isCheckingCore, setIsCheckingCore] = useState(false);
+  const [isUpdatingCore, setIsUpdatingCore] = useState(false);
   const [newInstanceName, setNewInstanceName] = useState('');
   const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus | null>(null);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
@@ -97,6 +109,11 @@ export function SettingsView({
       if (check.pythonVersion) setPythonVersion(check.pythonVersion);
       if (check.error) setValidationError(check.error);
 
+      const parsedLaunchArgs = launchArgsInput
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean);
+
       const updated: EnvironmentSettings = {
         comfyRoot: comfyRootInput.trim(),
         pythonBinary: pythonBinaryInput.trim() || check.detectedPython,
@@ -108,6 +125,7 @@ export function SettingsView({
         autoTorchShield: autoShield,
         comfyPort: comfyPortInput || 8188,
         minimizeToTray,
+        launchArgs: parsedLaunchArgs,
       };
 
       onUpdateSettings(updated);
@@ -139,6 +157,26 @@ export function SettingsView({
       setPythonBinaryInput(check.detectedPython);
       setPythonVersion(check.pythonVersion);
       if (check.pythonType) setPythonTypeInput(check.pythonType);
+    }
+  };
+
+  const handleCoreAction = async (action: 'status' | 'update') => {
+    if (!comfyRootInput.trim()) return;
+    if (action === 'update') setIsUpdatingCore(true);
+    else setIsCheckingCore(true);
+    try {
+      const res = await fetch('/api/environment/core', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, comfyRoot: comfyRootInput.trim() }),
+      });
+      const data = await res.json();
+      setCoreStatus(data);
+    } catch (err) {
+      setCoreStatus({ error: err instanceof Error ? err.message : 'Core check failed' });
+    } finally {
+      setIsCheckingCore(false);
+      setIsUpdatingCore(false);
     }
   };
 
@@ -234,6 +272,50 @@ export function SettingsView({
               {validationError && (
                 <p className="text-xs text-rose-400 mt-1.5 font-mono">{validationError}</p>
               )}
+
+              {/* ComfyUI Core Git Status & Updater */}
+              <div className="mt-3 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-[11px] font-mono text-slate-400">
+                  {coreStatus ? (
+                    coreStatus.error ? (
+                      <span className="text-rose-400">{coreStatus.error}</span>
+                    ) : !coreStatus.isGitRepo ? (
+                      <span>{coreStatus.message}</span>
+                    ) : (
+                      <span>
+                        Core: <strong className="text-slate-200">{coreStatus.branch}@{coreStatus.commit}</strong>{' '}
+                        {coreStatus.hasUpdate ? (
+                          <span className="text-amber-300">({coreStatus.behindCount} behind upstream)</span>
+                        ) : (
+                          <span className="text-emerald-400">(up to date)</span>
+                        )}
+                      </span>
+                    )
+                  ) : (
+                    <span>Check ComfyUI core repository version &amp; updates</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={isCheckingCore || !comfyRootInput.trim()}
+                    onClick={() => void handleCoreAction('status')}
+                    className="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 border border-slate-700 transition-colors"
+                  >
+                    {isCheckingCore ? 'Checking…' : 'Check Core'}
+                  </button>
+                  {coreStatus?.isGitRepo && coreStatus.hasUpdate && (
+                    <button
+                      type="button"
+                      disabled={isUpdatingCore}
+                      onClick={() => void handleCoreAction('update')}
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-colors"
+                    >
+                      {isUpdatingCore ? 'Pulling…' : 'Update Core'}
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -392,6 +474,50 @@ export function SettingsView({
                   onChange={(e) => setComfyPortInput(Number(e.target.value) || 8188)}
                   className="w-24 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono tabular-nums text-slate-100 focus:outline-none focus:border-indigo-500"
                 />
+              </div>
+
+              <div className="p-3 rounded-lg border border-slate-800 bg-slate-950 space-y-2">
+                <div>
+                  <div className="text-xs font-semibold text-slate-200">
+                    ComfyUI Launch Flags
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    Extra CLI flags passed to <code className="font-mono">main.py</code> when launching ComfyUI.
+                  </div>
+                </div>
+                <input
+                  type="text"
+                  value={launchArgsInput}
+                  onChange={(e) => setLaunchArgsInput(e.target.value)}
+                  placeholder="--preview-method auto --fast"
+                  className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                />
+                <div className="flex flex-wrap gap-1.5">
+                  {['--lowvram', '--highvram', '--fast', '--preview-method auto', '--listen 0.0.0.0'].map((flag) => {
+                    const active = launchArgsInput.includes(flag);
+                    return (
+                      <button
+                        key={flag}
+                        type="button"
+                        onClick={() => {
+                          setLaunchArgsInput((prev) => {
+                            if (prev.includes(flag)) {
+                              return prev.replace(flag, '').replace(/\s+/g, ' ').trim();
+                            }
+                            return `${prev} ${flag}`.trim();
+                          });
+                        }}
+                        className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-colors ${
+                          active
+                            ? 'bg-indigo-600/30 border-indigo-500 text-indigo-200'
+                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {flag}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               {isTauri && (
@@ -691,6 +817,7 @@ export function SettingsView({
                       pythonBinary: pythonBinaryInput.trim() || 'python',
                       pythonType: pythonTypeInput,
                       port: comfyPortInput || 8188,
+                      launchArgs: launchArgsInput.trim().split(/\s+/).filter(Boolean),
                     };
                     onSaveInstances([...instances, next]);
                     setNewInstanceName('');

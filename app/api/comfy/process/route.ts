@@ -16,14 +16,20 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { action, comfyRoot, pythonBinary, port } = body;
+    const { action, comfyRoot, pythonBinary, port, launchArgs } = body;
     const resolvedPort = typeof port === 'number' && port > 0 ? port : 8188;
+    const resolvedArgs = Array.isArray(launchArgs) ? launchArgs : [];
 
     if (action === 'start') {
       if (typeof comfyRoot !== 'string' || !comfyRoot.trim()) {
         return NextResponse.json({ error: 'comfyRoot is required' }, { status: 400 });
       }
-      const snapshot = await startComfyProcess(comfyRoot, pythonBinary || 'python', resolvedPort);
+      const snapshot = await startComfyProcess(
+        comfyRoot,
+        pythonBinary || 'python',
+        resolvedPort,
+        resolvedArgs
+      );
       return NextResponse.json(snapshot);
     }
 
@@ -36,7 +42,12 @@ export async function POST(req: NextRequest) {
       if (typeof comfyRoot !== 'string' || !comfyRoot.trim()) {
         return NextResponse.json({ error: 'comfyRoot is required' }, { status: 400 });
       }
-      const snapshot = await restartComfyProcess(comfyRoot, pythonBinary || 'python', resolvedPort);
+      const snapshot = await restartComfyProcess(
+        comfyRoot,
+        pythonBinary || 'python',
+        resolvedPort,
+        resolvedArgs
+      );
       return NextResponse.json(snapshot);
     }
 

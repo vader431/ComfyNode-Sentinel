@@ -14,6 +14,7 @@ import {
   Layers,
 } from 'lucide-react';
 import { bytesToGiB } from '@/lib/comfy-telemetry';
+import { analyzeComfyLogs } from '@/lib/crash-doctor';
 import type {
   TerminalLogEntry,
   PipQueueItem,
@@ -73,6 +74,7 @@ export function ConsoleDrawer({
   if (!isOpen) return null;
 
   const recentLogs = logs.slice(-80);
+  const crashCount = analyzeComfyLogs(recentLogs).length;
   const runningPipCount = pipQueue.filter((q) => q.status === 'running' || q.status === 'queued').length;
   const isComfyOnline = Boolean(comfyTelemetry?.online);
   const queueRunning = comfyTelemetry?.queue.runningItems ?? [];
@@ -105,6 +107,18 @@ export function ConsoleDrawer({
             {runningPipCount > 0 && (
               <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 text-[10px] tabular-nums">
                 {runningPipCount} pip
+              </span>
+            )}
+            {crashCount > 0 && (
+              <span
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onExpandToFullTab();
+                }}
+                title="Open Crash & Traceback Doctor in Console"
+                className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[10px] tabular-nums cursor-pointer hover:bg-rose-500/30"
+              >
+                {crashCount} crash{crashCount > 1 ? 'es' : ''}
               </span>
             )}
           </button>

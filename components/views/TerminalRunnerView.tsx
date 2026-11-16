@@ -20,6 +20,7 @@ import {
   extractProtectedTorchPackages,
   stripProtectedTorchPackages,
 } from '@/lib/torch-shield';
+import { analyzeComfyLogs } from '@/lib/crash-doctor';
 
 interface TerminalRunnerViewProps {
   logs: TerminalLogEntry[];
@@ -29,6 +30,7 @@ interface TerminalRunnerViewProps {
   onClearLogs: () => void;
   onEnqueuePip: (nodeName: string, requirements: string[]) => void;
   onResolveShield: (queueItemId: string, stripTorch: boolean) => void;
+  onDisableNodeFolder?: (folderName: string) => void;
   autoTorchShield: boolean;
   comfyRoot: string;
   pythonBinary?: string;
@@ -43,6 +45,7 @@ export function TerminalRunnerView({
   onClearLogs,
   onEnqueuePip,
   onResolveShield,
+  onDisableNodeFolder,
   autoTorchShield,
   comfyRoot,
   pythonBinary,
@@ -71,6 +74,8 @@ export function TerminalRunnerView({
       (l) => l.text.toLowerCase().includes(q) || l.type.toLowerCase().includes(q)
     );
   }, [logs, logFilterQuery]);
+
+  const crashDiagnostics = React.useMemo(() => analyzeComfyLogs(logs), [logs]);
 
   useEffect(() => {
     terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -182,6 +187,60 @@ export function TerminalRunnerView({
           </div>
         </div>
       </div>
+
+      {/* Crash & Traceback Doctor */}
+      {crashDiagnostics.length > 0 && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-950/20 p-4 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs font-semibold text-amber-200">
+              <Flame className="w-4 h-4 text-amber-400" />
+              <span>Crash &amp; Traceback Doctor ({crashDiagnostics.length} detected)</span>
+            </div>
+            <span className="text-[11px] font-mono text-amber-300/80">
+              Auto-parsed from ComfyUI logs
+            </span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+            {crashDiagnostics.slice(0, 4).map((diag) => (
+              <div
+                key={diag.id}
+                className="p-3 rounded-lg border border-amber-800/40 bg-slate-950/80 flex flex-col justify-between gap-2"
+              >
+                <div>
+                  <div className="text-xs font-semibold text-white">{diag.title}</div>
+                  <div className="text-[11px] font-mono text-slate-400 mt-0.5 break-all">
+                    {diag.detail}
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {diag.suggestedPipPackage && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onEnqueuePip(diag.nodeFolderName || 'crash-doctor', [
+                          diag.suggestedPipPackage as string,
+                        ])
+                      }
+                      className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+                    >
+                      Install {diag.suggestedPipPackage}
+                    </button>
+                  )}
+                  {diag.nodeFolderName && onDisableNodeFolder && (
+                    <button
+                      type="button"
+                      onClick={() => onDisableNodeFolder(diag.nodeFolderName as string)}
+                      className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-slate-800 hover:bg-slate-700 text-amber-200 border border-slate-700 transition-colors"
+                    >
+                      Disable {diag.nodeFolderName}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Emergency Torch Shield Modal / Callout if blocked */}
       {shieldActivePendingItem && (

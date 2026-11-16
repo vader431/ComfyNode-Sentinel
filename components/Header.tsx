@@ -26,6 +26,7 @@ export type ActiveTab =
   | 'inspector'
   | 'registry'
   | 'updates'
+  | 'frontend'
   | 'doctor'
   | 'profiles'
   | 'models'

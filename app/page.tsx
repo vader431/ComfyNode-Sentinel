@@ -10,6 +10,7 @@ import { StatusBar } from '@/components/StatusBar';
 import { InspectorView } from '@/components/views/InspectorView';
 import { TerminalRunnerView } from '@/components/views/TerminalRunnerView';
 import { RegistryView } from '@/components/views/RegistryView';
+import { FrontendView } from '@/components/views/FrontendView';
 import { LockfileView } from '@/components/views/LockfileView';
 import { HealthDoctorView } from '@/components/views/HealthDoctorView';
 import { ProfilesView } from '@/components/views/ProfilesView';
@@ -209,8 +210,24 @@ function SentinelWorkspace() {
       if (env.isValidRoot) {
         const scan = await scanNodesReal(comfyRoot);
         if (!scan.error) {
-          setNodes(scan.nodes);
-          StorageService.setNodes(scan.nodes);
+          setNodes((prevNodes) => {
+            const prevByFolder = new Map(prevNodes.map((p) => [p.folderName, p]));
+            const merged = scan.nodes.map((scanned) => {
+              const prev = prevByFolder.get(scanned.folderName);
+              if (!prev?.latestCommit) return scanned;
+              const upToDate =
+                Boolean(scanned.currentCommit) &&
+                (scanned.currentCommit.startsWith(prev.latestCommit) ||
+                  prev.latestCommit.startsWith(scanned.currentCommit));
+              return {
+                ...scanned,
+                latestCommit: prev.latestCommit,
+                hasUpdate: upToDate ? false : prev.hasUpdate,
+              };
+            });
+            StorageService.setNodes(merged);
+            return merged;
+          });
           setTrashNodes(scan.trashNodes);
           StorageService.setTrash(scan.trashNodes);
           setScannedRequirementsMap(scan.requirementsMap);
@@ -955,6 +972,19 @@ function SentinelWorkspace() {
       type: 'success',
       text: `[Updated] ${folderName}: ${res.previousCommit} -> ${res.newCommit}`,
     });
+    const nextCommit = res.newCommit || target.latestCommit || target.currentCommit;
+    updateNodes(
+      nodes.map((n) =>
+        n.folderName === folderName
+          ? {
+              ...n,
+              currentCommit: nextCommit,
+              latestCommit: nextCommit,
+              hasUpdate: false,
+            }
+          : n
+      )
+    );
     await performFullScan(settings.comfyRoot, settings.pythonBinary);
     return { ok: true, message: `Updated ${folderName} (${res.previousCommit} -> ${res.newCommit}).` };
   };
@@ -1207,6 +1237,7 @@ function SentinelWorkspace() {
       pythonBinary: target.pythonBinary,
       pythonType: target.pythonType,
       comfyPort: target.port,
+      launchArgs: target.launchArgs,
     };
     setSettings(nextSettings);
     StorageService.setSettings(nextSettings);
@@ -1225,6 +1256,7 @@ function SentinelWorkspace() {
           comfyRoot: settings.comfyRoot,
           pythonBinary: settings.pythonBinary || 'python',
           port,
+          launchArgs: settings.launchArgs || [],
         }),
       });
       const data = await res.json();
@@ -1446,6 +1478,16 @@ function SentinelWorkspace() {
                 onClearLogs={clearLogs}
                 onEnqueuePip={handleEnqueuePip}
                 onResolveShield={handleResolveShield}
+                onDisableNodeFolder={(folderName) => {
+                  const match = nodes.find(
+                    (n) => n.folderName.toLowerCase() === folderName.toLowerCase() && n.enabled
+                  );
+                  if (match) {
+                    void handleToggleNodeState(match.id);
+                  } else {
+                    pushToast('info', 'Node Already Disabled', `${folderName} is not active.`);
+                  }
+                }}
                 autoTorchShield={settings.autoTorchShield}
                 comfyRoot={settings.comfyRoot}
                 pythonBinary={settings.pythonBinary}
@@ -1472,6 +1514,17 @@ function SentinelWorkspace() {
               />
             )}
 
+            {activeTab === 'frontend' && (
+              <FrontendView
+                comfyRoot={settings.comfyRoot}
+                pythonBinary={settings.pythonBinary}
+                isValidRoot={settings.isValidRoot}
+                onAddLog={addLog}
+                onNotify={pushToast}
+                onNavigateToSettings={() => setActiveTab('settings')}
+              />
+            )}
+
             {activeTab === 'lockfile' && (
               <LockfileView
                 installedNodes={nodes}
@@ -1494,6 +1547,7 @@ function SentinelWorkspace() {
                 profiles={profiles}
                 activeProfileId={activeProfileId}
                 installedNodes={nodes}
+                comfyRoot={settings.comfyRoot}
                 onSwitchProfile={handleSwitchProfile}
                 onCreateProfile={handleCreateProfile}
                 onInstallMissingNodes={handleInstallMissingNodes}

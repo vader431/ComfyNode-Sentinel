@@ -3,9 +3,12 @@
  * Decodes PNG tEXt and iTXt chunks to extract embedded workflow JSON.
  */
 
+import type { WorkflowModelReference } from '@/types';
+
 export interface ExtractedWorkflowData {
   workflowJson: Record<string, unknown> | null;
   nodeTypes: string[];
+  modelReferences: WorkflowModelReference[];
   rawText?: string;
   sourceType: 'png-metadata' | 'json-file';
 }
@@ -26,6 +29,7 @@ export async function extractWorkflowFromBuffer(
       return {
         workflowJson: parsed,
         nodeTypes,
+        modelReferences: extractModelReferencesFromJson(parsed),
         rawText: text,
         sourceType: 'json-file',
       };
@@ -86,6 +90,7 @@ export async function extractWorkflowFromBuffer(
                 return {
                   workflowJson: parsed,
                   nodeTypes,
+                  modelReferences: extractModelReferencesFromJson(parsed),
                   rawText: textValue,
                   sourceType: 'png-metadata',
                 };
@@ -125,6 +130,7 @@ export async function extractWorkflowFromBuffer(
                 return {
                   workflowJson: parsed,
                   nodeTypes,
+                  modelReferences: extractModelReferencesFromJson(parsed),
                   rawText: textValue,
                   sourceType: 'png-metadata',
                 };
@@ -192,4 +198,97 @@ export function extractNodeTypesFromJson(data: unknown): string[] {
   }
 
   return Array.from(nodeTypes).filter(Boolean);
+}
+
+const MODEL_LOADER_TYPE_MAP: Record<string, WorkflowModelReference['modelType']> = {
+  CheckpointLoaderSimple: 'checkpoints',
+  CheckpointLoader: 'checkpoints',
+  unCLIPCheckpointLoader: 'checkpoints',
+  LoraLoader: 'loras',
+  LoraLoaderModelOnly: 'loras',
+  ControlNetLoader: 'controlnet',
+  DiffControlNetLoader: 'controlnet',
+  VAELoader: 'vae',
+  UNETLoader: 'unet',
+  CLIPLoader: 'clip',
+  DualCLIPLoader: 'clip',
+  TripleCLIPLoader: 'clip',
+  UpscaleModelLoader: 'upscale_models',
+};
+
+const MODEL_FILE_EXT_RE = /\.(safetensors|ckpt|pt|pth|bin|gguf|sft)$/i;
+
+function inferModelTypeFromKeyOrNode(
+  nodeClass: string,
+  inputKey?: string
+): WorkflowModelReference['modelType'] {
+  if (MODEL_LOADER_TYPE_MAP[nodeClass]) {
+    return MODEL_LOADER_TYPE_MAP[nodeClass];
+  }
+  const key = (inputKey || nodeClass).toLowerCase();
+  if (key.includes('lora')) return 'loras';
+  if (key.includes('control')) return 'controlnet';
+  if (key.includes('vae')) return 'vae';
+  if (key.includes('upscale')) return 'upscale_models';
+  if (key.includes('unet')) return 'unet';
+  if (key.includes('clip')) return 'clip';
+  return 'checkpoints';
+}
+
+/**
+ * Extracts referenced model filenames (checkpoints, LoRAs, ControlNets, VAEs, UNETs, CLIPs)
+ * from either UI-style workflow.json or API-style prompt.json.
+ */
+export function extractModelReferencesFromJson(data: unknown): WorkflowModelReference[] {
+  if (!data || typeof data !== 'object') return [];
+
+  const refs: WorkflowModelReference[] = [];
+  const seen = new Set<string>();
+
+  const addRef = (fileName: string, nodeClass: string, inputKey?: string) => {
+    const trimmed = fileName.trim();
+    if (!trimmed || !MODEL_FILE_EXT_RE.test(trimmed)) return;
+    const modelType = inferModelTypeFromKeyOrNode(nodeClass, inputKey);
+    const dedupeKey = `${modelType}:${trimmed.toLowerCase()}`;
+    if (seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+    refs.push({ fileName: trimmed, modelType, nodeClass });
+  };
+
+  const inspectPromptGraph = (graph: Record<string, unknown>) => {
+    for (const val of Object.values(graph)) {
+      if (!val || typeof val !== 'object') continue;
+      const rec = val as Record<string, unknown>;
+      if (typeof rec.class_type === 'string' && rec.inputs && typeof rec.inputs === 'object') {
+        for (const [k, v] of Object.entries(rec.inputs as Record<string, unknown>)) {
+          if (typeof v === 'string') {
+            addRef(v, rec.class_type, k);
+          }
+        }
+      }
+    }
+  };
+
+  const obj = data as Record<string, unknown>;
+
+  if (Array.isArray(obj.nodes)) {
+    for (const node of obj.nodes) {
+      if (!node || typeof node !== 'object') continue;
+      const rec = node as Record<string, unknown>;
+      const nodeClass = typeof rec.type === 'string' ? rec.type : '';
+      if (!nodeClass || !Array.isArray(rec.widgets_values)) continue;
+      for (const val of rec.widgets_values) {
+        if (typeof val === 'string') {
+          addRef(val, nodeClass);
+        }
+      }
+    }
+  }
+
+  inspectPromptGraph(obj);
+  if (obj.prompt && typeof obj.prompt === 'object') {
+    inspectPromptGraph(obj.prompt as Record<string, unknown>);
+  }
+
+  return refs;
 }
