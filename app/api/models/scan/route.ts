@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { BaseModelFamily, ModelAsset, ModelCategory } from '@/types';
 import { computeFastFileFingerprint, expandHomeDir } from '@/lib/server-fs';
+import { parseExtraModelPathsYaml } from '@/lib/extra-model-paths';
 
 const MODEL_EXTENSIONS = new Set(['.safetensors', '.ckpt', '.pt', '.pth', '.bin', '.gguf']);
 const CATEGORIES: ModelCategory[] = ['checkpoints', 'loras', 'controlnet', 'vae', 'upscale_models'];
@@ -28,15 +29,14 @@ export async function POST(req: NextRequest) {
     }
 
     const modelsDir = path.join(comfyRoot, 'models');
-    if (!fs.existsSync(modelsDir)) {
-      return NextResponse.json({ models: [] });
-    }
-
     const scanned: ModelAsset[] = [];
+    const seenRealDirs = new Set<string>();
 
-    for (const category of CATEGORIES) {
-      const catDir = path.join(modelsDir, category);
-      if (!fs.existsSync(catDir)) continue;
+    const scanCategoryDir = (catDir: string, category: ModelCategory, labelPrefix?: string) => {
+      if (!fs.existsSync(catDir)) return;
+      const normalizedDir = path.resolve(catDir).toLowerCase();
+      if (seenRealDirs.has(`${category}:${normalizedDir}`)) return;
+      seenRealDirs.add(`${category}:${normalizedDir}`);
 
       const walk = (dir: string, depth: number) => {
         if (depth > 4) return;
@@ -70,7 +70,9 @@ export async function POST(req: NextRequest) {
             const stat = isSymlink ? fs.statSync(fullPath) : lstat;
             const sizeBytes = isSymlink ? 0 : stat.size;
             const sizeGb = Number((sizeBytes / (1024 * 1024 * 1024)).toFixed(2));
-            const relPath = path.relative(comfyRoot, fullPath).replace(/\\/g, '/');
+            const relPath = labelPrefix
+              ? `[${labelPrefix}] ${path.relative(catDir, fullPath).replace(/\\/g, '/')}`
+              : path.relative(comfyRoot, fullPath).replace(/\\/g, '/');
 
             const hash =
               !isSymlink && sizeBytes > 0
@@ -99,6 +101,28 @@ export async function POST(req: NextRequest) {
       };
 
       walk(catDir, 0);
+    };
+
+    if (fs.existsSync(modelsDir)) {
+      for (const category of CATEGORIES) {
+        scanCategoryDir(path.join(modelsDir, category), category);
+      }
+    }
+
+    const extraYamlPath = path.join(comfyRoot, 'extra_model_paths.yaml');
+    if (fs.existsSync(extraYamlPath)) {
+      try {
+        const extraEntries = parseExtraModelPathsYaml(fs.readFileSync(extraYamlPath, 'utf-8'));
+        for (const entry of extraEntries) {
+          scanCategoryDir(
+            expandHomeDir(entry.resolvedDir),
+            entry.category,
+            entry.section || 'extra'
+          );
+        }
+      } catch {
+        // ignore malformed extra_model_paths.yaml
+      }
     }
 
     // Mark duplicates only for non-symlink, non-empty files with identical hashes

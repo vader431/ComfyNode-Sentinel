@@ -69,7 +69,9 @@ export interface AppUpdateStatus {
   matchedAsset?: DesktopReleaseAsset | null;
   allAssets?: DesktopReleaseAsset[];
   error?: string;
-  installAndRelaunch?: () => Promise<void>;
+  installAndRelaunch?: (
+    onProgress?: (progress: { downloaded: number; total: number | null; percent: number | null }) => void
+  ) => Promise<void>;
 }
 
 export function detectClientPlatformFamily(userAgentOverride?: string): 'windows' | 'macos' | 'linux' {
@@ -142,8 +144,28 @@ export async function nativeCheckAppUpdate(currentVersion: string): Promise<AppU
           currentVersion,
           notes: update.body,
           isSignedNativeUpdate: true,
-          installAndRelaunch: async () => {
-            await update.downloadAndInstall();
+          installAndRelaunch: async (onProgress) => {
+            let downloaded = 0;
+            let total: number | null = null;
+            await update.downloadAndInstall((event) => {
+              if (!onProgress) return;
+              if (event.event === 'Started') {
+                total = event.data.contentLength ?? null;
+                downloaded = 0;
+                onProgress({ downloaded: 0, total, percent: total ? 0 : null });
+              } else if (event.event === 'Progress') {
+                downloaded += event.data.chunkLength;
+                const percent =
+                  total && total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : null;
+                onProgress({ downloaded, total, percent });
+              } else if (event.event === 'Finished') {
+                onProgress({
+                  downloaded: total ?? downloaded,
+                  total,
+                  percent: 100,
+                });
+              }
+            });
             await relaunch();
           },
         };

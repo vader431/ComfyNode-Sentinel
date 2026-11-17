@@ -17,6 +17,11 @@ export function AppUpdaterModal({ isOpen, onClose }: AppUpdaterModalProps) {
   const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus | null>(null);
   const [isChecking, setIsChecking] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
+  const [installProgress, setInstallProgress] = useState<{
+    downloaded: number;
+    total: number | null;
+    percent: number | null;
+  } | null>(null);
 
   if (!isOpen) return null;
 
@@ -111,24 +116,45 @@ export function AppUpdaterModal({ isOpen, onClose }: AppUpdaterModalProps) {
                   )}
 
                   {updateStatus.installAndRelaunch ? (
-                    <button
-                      type="button"
-                      disabled={isInstalling}
-                      onClick={async () => {
-                        setIsInstalling(true);
-                        try {
-                          await updateStatus.installAndRelaunch?.();
-                        } finally {
-                          setIsInstalling(false);
-                        }
-                      }}
-                      className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold shadow-md transition-colors flex items-center justify-center gap-2"
-                    >
-                      <Download className={`w-4 h-4 ${isInstalling ? 'animate-bounce' : ''}`} />
-                      <span>
-                        {isInstalling ? 'Downloading & Applying Patch…' : 'Restart to Update'}
-                      </span>
-                    </button>
+                    <div className="space-y-2.5">
+                      <button
+                        type="button"
+                        disabled={isInstalling}
+                        onClick={async () => {
+                          setIsInstalling(true);
+                          setInstallProgress({ downloaded: 0, total: null, percent: 0 });
+                          try {
+                            await updateStatus.installAndRelaunch?.((p) => setInstallProgress(p));
+                          } finally {
+                            setIsInstalling(false);
+                          }
+                        }}
+                        className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold shadow-md transition-colors flex items-center justify-center gap-2"
+                      >
+                        <Download className={`w-4 h-4 ${isInstalling ? 'animate-bounce' : ''}`} />
+                        <span>
+                          {isInstalling
+                            ? installProgress?.percent !== null && installProgress?.percent !== undefined
+                              ? `Downloading Update (${installProgress.percent}%)…`
+                              : 'Downloading & Applying Patch…'
+                            : 'Restart to Update'}
+                        </span>
+                      </button>
+                      {isInstalling && installProgress && (
+                        <div className="space-y-1">
+                          <div className="h-1.5 w-full rounded-full bg-slate-900 border border-slate-800 overflow-hidden">
+                            {installProgress.percent !== null ? (
+                              <div
+                                className="h-full bg-emerald-400 transition-all duration-150"
+                                style={{ width: `${installProgress.percent}%` }}
+                              />
+                            ) : (
+                              <div className="h-full w-1/3 rounded-full bg-emerald-400 animate-pulse" />
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   ) : updateStatus.matchedAsset ? (
                     <a
                       href={updateStatus.matchedAsset.downloadUrl}

@@ -5,6 +5,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [0.6.0] - 2026-11-17
+
+### Added
+- **ComfyUI Core Updater (`ComfyUI Updater` tab above `Frontend`)**:
+  - Inspect ComfyUI core version/tag, branch, short commit hash, detached `HEAD` state, dirty working tree status, and incoming upstream commits.
+  - Pull upstream updates (`git pull --ff-only --progress`), switch/roll back to any ComfyUI GitHub release tag (`git checkout <ref> --progress`), and opt in to syncing core `requirements.txt` via the sequential FIFO Pip Queue & Torch Shield.
+- **Model Downloader & Extra Model Paths**:
+  - Direct streaming model downloads (`POST /api/models/download`) with progress tracking and `extra_model_paths.yaml` management (`POST /api/environment/extra-paths`).
+- **Diagnostics Bundle Export**:
+  - Export redaction-safe diagnostics bundles (`lib/diagnostics-bundle.ts`) from Terminal & Diagnostics.
+
+### Fixed
+- **Real-Time Progress Bars**:
+  - Streamed NDJSON per-repository progress during `Check Updates` (`app/api/nodes/action/route.ts`, `RegistryView`), `git --progress` transfer percentages during ComfyUI Core updates, `@tauri-apps/plugin-updater` byte progress in `AppUpdaterModal`, and initial `0%` / indeterminate handling for model downloads.
+- **Community Registry Installed Badges (`lib/registry-match.ts`)**:
+  - Fixed **Installed** / **Installed (Disabled)** badge matching on `Install & Browse` cards to normalize SSH/HTTP/HTTPS/trailing-slash Git URLs and fall back to folder name matching.
+
+---
+
 ## [0.5.1] - 2026-11-16
 
 ### Fixed

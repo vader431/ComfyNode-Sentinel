@@ -163,16 +163,62 @@ export async function cloneNodeReal(
   return res.json();
 }
 
-export async function checkUpdatesReal(comfyRoot: string): Promise<{
+export async function checkUpdatesReal(
+  comfyRoot: string,
+  onProgress?: (progress: { current: number; total: number; folderName: string }) => void
+): Promise<{
   updates?: { folderName: string; hasUpdate: boolean; behindCount: number; latestCommit?: string }[];
   error?: string;
 }> {
   const res = await fetch('/api/nodes/action', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'check_updates', comfyRoot }),
+    body: JSON.stringify({ action: 'check_updates', comfyRoot, stream: Boolean(onProgress) }),
   });
-  return res.json();
+
+  if (!onProgress || !res.body || !res.headers.get('content-type')?.includes('ndjson')) {
+    return res.json();
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalResult: {
+    updates?: { folderName: string; hasUpdate: boolean; behindCount: number; latestCommit?: string }[];
+    error?: string;
+  } = {};
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const evt = JSON.parse(line) as {
+        type: string;
+        current?: number;
+        total?: number;
+        folderName?: string;
+        updates?: { folderName: string; hasUpdate: boolean; behindCount: number; latestCommit?: string }[];
+        error?: string;
+      };
+      if (evt.type === 'progress') {
+        onProgress({
+          current: evt.current ?? 0,
+          total: evt.total ?? 0,
+          folderName: evt.folderName ?? '',
+        });
+      } else if (evt.type === 'done') {
+        finalResult = { updates: evt.updates };
+      } else if (evt.type === 'error') {
+        finalResult = { error: evt.error };
+      }
+    }
+  }
+
+  return finalResult;
 }
 
 export async function updateNodeReal(

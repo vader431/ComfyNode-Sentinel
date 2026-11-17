@@ -19,6 +19,7 @@ import {
 import { RegistryNode, InstalledNode, UpdateTransaction } from '@/types';
 import { COMMUNITY_REGISTRY } from '@/lib/default-data';
 import { generateGitBisectScript } from '@/lib/transaction-history';
+import { createInstalledNodeMatcher } from '@/lib/registry-match';
 
 type ActionResult = { ok: boolean; message: string } | void;
 
@@ -86,13 +87,11 @@ export function RegistryView({
 
   const categories = Array.from(new Set(COMMUNITY_REGISTRY.map((r) => r.category)));
 
-  // Check if a registry node is installed
-  const isInstalled = (gitUrl: string) => {
-    const clean = gitUrl.replace(/\.git$/, '').toLowerCase();
-    return installedNodes.some(
-      (n) => n.gitUrl.replace(/\.git$/, '').toLowerCase() === clean
-    );
-  };
+  // Match registry nodes against installed nodes (normalized URL + folderName fallback)
+  const matchInstalledNode = React.useMemo(
+    () => createInstalledNodeMatcher(installedNodes),
+    [installedNodes]
+  );
 
   React.useEffect(() => {
     let cancelled = false;
@@ -408,14 +407,18 @@ export function RegistryView({
       {/* Registry Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredRegistry.map((node) => {
-          const installed = isInstalled(node.gitUrl);
+          const installedMatch = matchInstalledNode(node);
+          const installed = Boolean(installedMatch);
+          const isDisabled = installedMatch ? !installedMatch.enabled : false;
 
           return (
             <div
               key={node.id}
               className={`flex flex-col justify-between rounded-xl border p-5 transition-colors shadow-sm ${
                 installed
-                  ? 'border-emerald-500/40 bg-emerald-950/10 hover:border-emerald-500/60'
+                  ? isDisabled
+                    ? 'border-amber-500/40 bg-amber-950/10 hover:border-amber-500/60'
+                    : 'border-emerald-500/40 bg-emerald-950/10 hover:border-emerald-500/60'
                   : 'border-slate-800 bg-slate-900/60 hover:border-slate-700'
               }`}
             >
@@ -427,9 +430,15 @@ export function RegistryView({
                         {node.name}
                       </h3>
                       {installed && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-[10px] font-mono font-semibold text-emerald-300">
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold border ${
+                            isDisabled
+                              ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                              : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                          }`}
+                        >
                           <CheckCircle2 className="w-3 h-3" />
-                          <span>Installed</span>
+                          <span>{isDisabled ? 'Installed (Disabled)' : 'Installed'}</span>
                         </span>
                       )}
                     </div>
@@ -551,30 +560,35 @@ export function RegistryView({
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
                   <span>
                     {updateProgress.phase === 'checking'
-                      ? `Checking upstream git remotes (${updateProgress.total} repositories)...`
+                      ? `Checking upstream git remotes (${updateProgress.current} / ${updateProgress.total})${
+                          updateProgress.currentNode ? `: ${updateProgress.currentNode}` : ''
+                        }`
                       : `Updating repositories (${updateProgress.current} / ${updateProgress.total})${
                           updateProgress.currentNode ? `: ${updateProgress.currentNode}` : ''
                         }`}
                   </span>
                 </div>
-                {updateProgress.phase === 'updating' && updateProgress.total > 0 && (
+                {updateProgress.total > 0 && (
                   <span className="font-mono text-indigo-300 font-semibold tabular-nums">
-                    {Math.round((updateProgress.current / updateProgress.total) * 100)}%
+                    {Math.min(100, Math.round((updateProgress.current / updateProgress.total) * 100))}%
                   </span>
                 )}
               </div>
               <div className="h-2 w-full rounded-full bg-slate-900 border border-slate-800 overflow-hidden">
-                {updateProgress.phase === 'checking' ? (
-                  <div className="h-full w-1/2 rounded-full bg-gradient-to-r from-indigo-500 via-sky-400 to-indigo-500 animate-pulse" />
+                {updateProgress.total <= 0 ? (
+                  <div className="h-full w-1/3 rounded-full bg-gradient-to-r from-indigo-500 via-sky-400 to-indigo-500 animate-pulse" />
                 ) : (
                   <div
-                    className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-emerald-400 transition-all duration-300"
+                    className={`h-full rounded-full transition-all duration-300 ${
+                      updateProgress.phase === 'checking'
+                        ? 'bg-gradient-to-r from-indigo-500 to-sky-400'
+                        : 'bg-gradient-to-r from-indigo-500 to-emerald-400'
+                    }`}
                     style={{
-                      width: `${
-                        updateProgress.total > 0
-                          ? Math.min(100, Math.round((updateProgress.current / updateProgress.total) * 100))
-                          : 0
-                      }%`,
+                      width: `${Math.min(
+                        100,
+                        Math.round((updateProgress.current / updateProgress.total) * 100)
+                      )}%`,
                     }}
                   />
                 )}

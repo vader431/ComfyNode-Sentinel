@@ -10,6 +10,7 @@ import { StatusBar } from '@/components/StatusBar';
 import { InspectorView } from '@/components/views/InspectorView';
 import { TerminalRunnerView } from '@/components/views/TerminalRunnerView';
 import { RegistryView } from '@/components/views/RegistryView';
+import { ComfyUpdaterView } from '@/components/views/ComfyUpdaterView';
 import { FrontendView } from '@/components/views/FrontendView';
 import { LockfileView } from '@/components/views/LockfileView';
 import { HealthDoctorView } from '@/components/views/HealthDoctorView';
@@ -60,7 +61,7 @@ import {
   UpdateTransaction,
 } from '@/types';
 
-const emptySubscribe = () => () => {};
+const emptySubscribe = () => () => { };
 let nextQueueIndex = 1;
 function createQueueId(): string {
   nextQueueIndex += 1;
@@ -129,6 +130,7 @@ function SentinelWorkspace() {
     stepProgress: null,
   });
   const comfyLastLogIdRef = React.useRef<number>(0);
+  const prevComfyStatusRef = React.useRef<'stopped' | 'starting' | 'running' | 'error'>('stopped');
 
   const addLog = (entry: Omit<TerminalLogEntry, 'id'>) => {
     const newEntry: TerminalLogEntry = {
@@ -302,7 +304,14 @@ function SentinelWorkspace() {
         const res = await fetch(`/api/comfy/process?since=${comfyLastLogIdRef.current}`);
         if (!res.ok || cancelled) return;
         const data = await res.json();
-        setComfyProcessStatus(data.status || 'stopped');
+        const nextStatus = (data.status || 'stopped') as 'stopped' | 'starting' | 'running' | 'error';
+        if (prevComfyStatusRef.current === 'starting' && nextStatus === 'running') {
+          pushToast('success', 'ComfyUI Ready', `Listening on http://127.0.0.1:${data.port || 8188}`);
+        } else if (prevComfyStatusRef.current === 'starting' && nextStatus === 'error') {
+          pushToast('error', 'ComfyUI Boot Failed', 'Check Crash & Traceback Doctor in Console.');
+        }
+        prevComfyStatusRef.current = nextStatus;
+        setComfyProcessStatus(nextStatus);
         setComfyProcessPid(data.pid ?? null);
         if (Array.isArray(data.logs) && data.logs.length > 0) {
           for (const l of data.logs) {
@@ -330,7 +339,7 @@ function SentinelWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, [isClient, comfyProcessStatus]);
+  }, [isClient, comfyProcessStatus, pushToast]);
 
   const activeComfyPort = settings.comfyPort || 8188;
   const isComfyTelemetryOnline = Boolean(comfyTelemetry?.online);
@@ -417,11 +426,11 @@ function SentinelWorkspace() {
   const effectiveComfyWsState: ComfyWsProgressState = isComfyTelemetryOnline
     ? comfyWsState
     : {
-        wsConnected: false,
-        executingNode: null,
-        currentPromptId: null,
-        stepProgress: null,
-      };
+      wsConnected: false,
+      executingNode: null,
+      currentPromptId: null,
+      stepProgress: null,
+    };
 
   // Live environment & custom_nodes scanner on startup
   useEffect(() => {
@@ -451,9 +460,8 @@ function SentinelWorkspace() {
         addLog({
           timestamp: new Date().toLocaleTimeString(),
           type: 'info',
-          text: `[Atomic Rename] custom_nodes/${n.folderName} -> custom_nodes/${n.folderName}${
-            nextState ? '' : '.disabled'
-          }`,
+          text: `[Atomic Rename] custom_nodes/${n.folderName} -> custom_nodes/${n.folderName}${nextState ? '' : '.disabled'
+            }`,
         });
         return { ...n, enabled: nextState };
       }
@@ -617,11 +625,11 @@ function SentinelWorkspace() {
         if (item.id === queueItemId) {
           const finalRequirements = stripTorch
             ? item.requirements.filter(
-                (r) =>
-                  !['torch', 'torchvision', 'torchaudio'].some((tp) =>
-                    r.toLowerCase().startsWith(tp)
-                  )
-              )
+              (r) =>
+                !['torch', 'torchvision', 'torchaudio'].some((tp) =>
+                  r.toLowerCase().startsWith(tp)
+                )
+            )
             : item.requirements;
 
           addLog({
@@ -828,7 +836,15 @@ function SentinelWorkspace() {
     setUpdateProgress({ active: true, phase: 'checking', current: 0, total: nodes.length });
     let res;
     try {
-      res = await checkUpdatesReal(settings.comfyRoot);
+      res = await checkUpdatesReal(settings.comfyRoot, ({ current, total, folderName }) => {
+        setUpdateProgress({
+          active: true,
+          phase: 'checking',
+          current,
+          total: total > 0 ? total : nodes.length,
+          currentNode: folderName || undefined,
+        });
+      });
     } finally {
       setUpdateProgress(null);
     }
@@ -855,9 +871,8 @@ function SentinelWorkspace() {
     updateNodes(updatedNodes);
 
     const available = res.updates.filter((u) => u.hasUpdate);
-    const msg = `Checked ${res.updates.length} git repositories. ${available.length} update(s) available${
-      available.length > 0 ? `: ${available.map((a) => a.folderName).join(', ')}` : '.'
-    }`;
+    const msg = `Checked ${res.updates.length} git repositories. ${available.length} update(s) available${available.length > 0 ? `: ${available.map((a) => a.folderName).join(', ')}` : '.'
+      }`;
     addLog({
       timestamp: new Date().toLocaleTimeString(),
       type: available.length > 0 ? 'warn' : 'success',
@@ -977,11 +992,11 @@ function SentinelWorkspace() {
       nodes.map((n) =>
         n.folderName === folderName
           ? {
-              ...n,
-              currentCommit: nextCommit,
-              latestCommit: nextCommit,
-              hasUpdate: false,
-            }
+            ...n,
+            currentCommit: nextCommit,
+            latestCommit: nextCommit,
+            hasUpdate: false,
+          }
           : n
       )
     );
@@ -1474,10 +1489,12 @@ function SentinelWorkspace() {
                 key={targetRunnerCommand}
                 logs={logs}
                 pipQueue={pipQueue}
+                transactions={transactions}
                 onAddLog={addLog}
                 onClearLogs={clearLogs}
                 onEnqueuePip={handleEnqueuePip}
                 onResolveShield={handleResolveShield}
+                onRollbackTransaction={handleRollbackTransaction}
                 onDisableNodeFolder={(folderName) => {
                   const match = nodes.find(
                     (n) => n.folderName.toLowerCase() === folderName.toLowerCase() && n.enabled
@@ -1511,6 +1528,17 @@ function SentinelWorkspace() {
                 onUpdateSingleNode={handleUpdateSingleNode}
                 onRollbackTransaction={handleRollbackTransaction}
                 updateProgress={updateProgress}
+              />
+            )}
+
+            {activeTab === 'comfy-updater' && (
+              <ComfyUpdaterView
+                comfyRoot={settings.comfyRoot}
+                isValidRoot={settings.isValidRoot}
+                onAddLog={addLog}
+                onNotify={pushToast}
+                onNavigateToSettings={() => setActiveTab('settings')}
+                onEnqueueCoreRequirements={handleEnqueuePip}
               />
             )}
 
@@ -1573,6 +1601,8 @@ function SentinelWorkspace() {
                 settings={settings}
                 instances={instances}
                 activeInstanceId={activeInstanceId}
+                installedNodes={nodes}
+                logs={logs}
                 onUpdateSettings={handleUpdateSettings}
                 onSaveInstances={handleSaveInstances}
                 onSwitchInstance={handleSwitchInstance}

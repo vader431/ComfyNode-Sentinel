@@ -13,7 +13,12 @@ import {
   Search,
   X,
 } from 'lucide-react';
-import { InstalledNode, PipQueueItem, TerminalLogEntry } from '@/types';
+import {
+  InstalledNode,
+  PipQueueItem,
+  TerminalLogEntry,
+  UpdateTransaction,
+} from '@/types';
 import { streamExecReal } from '@/lib/system-client';
 import {
   isTorchProtectedRequirement,
@@ -26,11 +31,13 @@ interface TerminalRunnerViewProps {
   logs: TerminalLogEntry[];
   pipQueue: PipQueueItem[];
   installedNodes?: InstalledNode[];
+  transactions?: UpdateTransaction[];
   onAddLog: (entry: Omit<TerminalLogEntry, 'id'>) => void;
   onClearLogs: () => void;
   onEnqueuePip: (nodeName: string, requirements: string[]) => void;
   onResolveShield: (queueItemId: string, stripTorch: boolean) => void;
   onDisableNodeFolder?: (folderName: string) => void;
+  onRollbackTransaction?: (txId: string) => void;
   autoTorchShield: boolean;
   comfyRoot: string;
   pythonBinary?: string;
@@ -41,11 +48,13 @@ export function TerminalRunnerView({
   logs,
   pipQueue,
   installedNodes = [],
+  transactions = [],
   onAddLog,
   onClearLogs,
   onEnqueuePip,
   onResolveShield,
   onDisableNodeFolder,
+  onRollbackTransaction,
   autoTorchShield,
   comfyRoot,
   pythonBinary,
@@ -235,6 +244,25 @@ export function TerminalRunnerView({
                       Disable {diag.nodeFolderName}
                     </button>
                   )}
+                  {diag.nodeFolderName &&
+                    onRollbackTransaction &&
+                    (() => {
+                      const matchingTx = transactions.find(
+                        (tx) =>
+                          tx.status === 'applied' &&
+                          tx.nodeFolderName.toLowerCase() === diag.nodeFolderName?.toLowerCase()
+                      );
+                      if (!matchingTx) return null;
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => onRollbackTransaction(matchingTx.id)}
+                          className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-rose-950/60 hover:bg-rose-900/60 text-rose-200 border border-rose-700/50 transition-colors"
+                        >
+                          Rollback ({matchingTx.previousCommit.slice(0, 7)})
+                        </button>
+                      );
+                    })()}
                 </div>
               </div>
             ))}

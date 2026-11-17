@@ -18,8 +18,15 @@ import {
   ExternalLink,
   Package,
 } from 'lucide-react';
-import { ComfyInstance, DesktopRuntimeInfo, EnvironmentSettings } from '@/types';
+import {
+  ComfyInstance,
+  DesktopRuntimeInfo,
+  EnvironmentSettings,
+  InstalledNode,
+  TerminalLogEntry,
+} from '@/types';
 import { checkEnvironmentReal } from '@/lib/system-client';
+import { buildDiagnosticsMarkdown } from '@/lib/diagnostics-bundle';
 import {
   AppUpdateStatus,
   detectClientPlatformFamily,
@@ -37,6 +44,8 @@ interface SettingsViewProps {
   settings: EnvironmentSettings;
   instances?: ComfyInstance[];
   activeInstanceId?: string;
+  installedNodes?: InstalledNode[];
+  logs?: TerminalLogEntry[];
   onUpdateSettings: (settings: EnvironmentSettings) => void;
   onSaveInstances?: (instances: ComfyInstance[]) => void;
   onSwitchInstance?: (instanceId: string) => void;
@@ -52,6 +61,8 @@ export function SettingsView({
   settings,
   instances = [],
   activeInstanceId,
+  installedNodes = [],
+  logs = [],
   onUpdateSettings,
   onSaveInstances,
   onSwitchInstance,
@@ -608,6 +619,32 @@ export function SettingsView({
               <div>
                 <div className="text-slate-500 text-[10px]">Lockfile Schema:</div>
                 <div className="text-slate-300">comfy-lock.json v1.0.0</div>
+              </div>
+
+              <div className="pt-2 border-t border-slate-800/80 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const md = buildDiagnosticsMarkdown({
+                      appVersion: pkg.version,
+                      isTauri,
+                      desktopInfo,
+                      settings,
+                      installedNodes,
+                      logs,
+                    });
+                    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `comfynode-sentinel-diagnostics-v${pkg.version}.md`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                  className="flex-1 py-1.5 px-2.5 rounded-lg text-[11px] font-sans font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors"
+                >
+                  Export Diagnostics (.md)
+                </button>
               </div>
             </div>
           </div>

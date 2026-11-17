@@ -11,6 +11,9 @@ import {
   Sparkles,
   Info,
   RefreshCw,
+  Download,
+  FileCode2,
+  X,
 } from 'lucide-react';
 import {
   ModelAsset,
@@ -38,6 +41,27 @@ export function ModelsView({ comfyRoot, isValidRoot, onRunTerminalCommand }: Mod
   const [scanError, setScanError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<ModelCategory | 'all'>('all');
   const [copiedGroupHash, setCopiedGroupHash] = useState<string | null>(null);
+
+  // Direct Model Downloader state
+  const [showDownloader, setShowDownloader] = useState(false);
+  const [downloadUrl, setDownloadUrl] = useState('');
+  const [downloadCategory, setDownloadCategory] = useState<string>('checkpoints');
+  const [downloadFileName, setDownloadFileName] = useState('');
+  const [downloadToken, setDownloadToken] = useState('');
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<{
+    receivedBytes: number;
+    totalBytes: number;
+    percent: number | null;
+  } | null>(null);
+  const [downloadMessage, setDownloadMessage] = useState<string | null>(null);
+  const downloadAbortRef = React.useRef<AbortController | null>(null);
+
+  // extra_model_paths.yaml editor state
+  const [showExtraPaths, setShowExtraPaths] = useState(false);
+  const [extraYamlContent, setExtraYamlContent] = useState('');
+  const [isSavingExtraYaml, setIsSavingExtraYaml] = useState(false);
+  const [extraYamlMessage, setExtraYamlMessage] = useState<string | null>(null);
 
   // VRAM Estimator state
   const [vramParams, setVramParams] = useState<VramEstimationParams>({
@@ -119,6 +143,122 @@ export function ModelsView({ comfyRoot, isValidRoot, onRunTerminalCommand }: Mod
     }
   };
 
+  const handleOpenExtraPaths = async () => {
+    const nextOpen = !showExtraPaths;
+    setShowExtraPaths(nextOpen);
+    if (!nextOpen || !comfyRoot) return;
+    setExtraYamlMessage(null);
+    try {
+      const res = await fetch('/api/environment/extra-paths', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'read', comfyRoot }),
+      });
+      const data = await res.json();
+      if (typeof data.content === 'string') setExtraYamlContent(data.content);
+    } catch {
+      setExtraYamlMessage('Failed to load extra_model_paths.yaml');
+    }
+  };
+
+  const handleSaveExtraPaths = async () => {
+    if (!comfyRoot) return;
+    setIsSavingExtraYaml(true);
+    setExtraYamlMessage(null);
+    try {
+      const res = await fetch('/api/environment/extra-paths', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'save', comfyRoot, content: extraYamlContent }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setExtraYamlMessage(data.error || 'Failed to save extra_model_paths.yaml');
+        return;
+      }
+      setExtraYamlMessage(`Saved extra_model_paths.yaml (${data.parsedCount ?? 0} path entries).`);
+      await refreshModels();
+    } finally {
+      setIsSavingExtraYaml(false);
+    }
+  };
+
+  const handleStartDownload = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!comfyRoot || !downloadUrl.trim() || isDownloading) return;
+    const controller = new AbortController();
+    downloadAbortRef.current = controller;
+    setIsDownloading(true);
+    setDownloadProgress(null);
+    setDownloadMessage(null);
+    setScanError(null);
+
+    try {
+      const res = await fetch('/api/models/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          comfyRoot,
+          modelType: downloadCategory,
+          url: downloadUrl.trim(),
+          fileName: downloadFileName.trim() || undefined,
+          authToken: downloadToken.trim() || undefined,
+        }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok || !res.body) {
+        const errData = await res.json().catch(() => ({}));
+        setScanError(errData.error || `Download failed (HTTP ${res.status})`);
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const evt = JSON.parse(line) as {
+            type: string;
+            receivedBytes?: number;
+            totalBytes?: number;
+            percent?: number | null;
+            fileName?: string;
+            error?: string;
+          };
+          if (evt.type === 'progress') {
+            setDownloadProgress({
+              receivedBytes: evt.receivedBytes ?? 0,
+              totalBytes: evt.totalBytes ?? 0,
+              percent: evt.percent ?? null,
+            });
+          } else if (evt.type === 'done') {
+            setDownloadMessage(`Downloaded ${evt.fileName} into models/${downloadCategory}/`);
+            setDownloadUrl('');
+            setDownloadFileName('');
+            await refreshModels();
+          } else if (evt.type === 'error') {
+            setScanError(evt.error || 'Model download failed');
+          }
+        }
+      }
+    } catch (err) {
+      if (!(err instanceof DOMException && err.name === 'AbortError')) {
+        setScanError(err instanceof Error ? err.message : 'Download failed');
+      }
+    } finally {
+      downloadAbortRef.current = null;
+      setIsDownloading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Subnav Tabs */}
@@ -185,6 +325,167 @@ export function ModelsView({ comfyRoot, isValidRoot, onRunTerminalCommand }: Mod
             </div>
           )}
           {/* Metrics summary */}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              disabled={!isValidRoot}
+              onClick={() => setShowDownloader((v) => !v)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white transition-colors"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Download Model</span>
+            </button>
+            <button
+              type="button"
+              disabled={!isValidRoot}
+              onClick={() => void handleOpenExtraPaths()}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 border border-slate-700 transition-colors"
+            >
+              <FileCode2 className="w-3.5 h-3.5 text-indigo-400" />
+              <span>extra_model_paths.yaml</span>
+            </button>
+          </div>
+
+          {showDownloader && (
+            <form
+              onSubmit={handleStartDownload}
+              className="rounded-xl border border-indigo-500/40 bg-slate-900/70 p-4 space-y-3"
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-white">
+                  Direct Model Downloader (HuggingFace / Civitai / Direct URL)
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowDownloader(false)}
+                  className="text-slate-400 hover:text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-2.5">
+                <input
+                  type="url"
+                  required
+                  value={downloadUrl}
+                  onChange={(e) => setDownloadUrl(e.target.value)}
+                  placeholder="https://huggingface.co/.../model.safetensors"
+                  className="md:col-span-2 px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                />
+                <select
+                  value={downloadCategory}
+                  onChange={(e) => setDownloadCategory(e.target.value)}
+                  className="px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono text-slate-200 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="checkpoints">models/checkpoints</option>
+                  <option value="loras">models/loras</option>
+                  <option value="controlnet">models/controlnet</option>
+                  <option value="vae">models/vae</option>
+                  <option value="upscale_models">models/upscale_models</option>
+                  <option value="unet">models/unet</option>
+                  <option value="clip">models/clip</option>
+                </select>
+                <input
+                  type="text"
+                  value={downloadFileName}
+                  onChange={(e) => setDownloadFileName(e.target.value)}
+                  placeholder="Optional filename.safetensors"
+                  className="px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+                <input
+                  type="password"
+                  value={downloadToken}
+                  onChange={(e) => setDownloadToken(e.target.value)}
+                  placeholder="Optional Bearer token (for gated HuggingFace / Civitai models)"
+                  className="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                />
+                {isDownloading ? (
+                  <button
+                    type="button"
+                    onClick={() => downloadAbortRef.current?.abort()}
+                    className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white"
+                  >
+                    Cancel Download
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={!downloadUrl.trim()}
+                    className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white"
+                  >
+                    Start Download
+                  </button>
+                )}
+              </div>
+              {downloadProgress && (
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[11px] font-mono text-slate-300 tabular-nums">
+                    <span>
+                      {(downloadProgress.receivedBytes / (1024 * 1024)).toFixed(1)} MB
+                      {downloadProgress.totalBytes > 0
+                        ? ` / ${(downloadProgress.totalBytes / (1024 * 1024)).toFixed(1)} MB`
+                        : ''}
+                    </span>
+                    <span>
+                      {downloadProgress.percent !== null ? `${downloadProgress.percent}%` : 'Streaming…'}
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                    {downloadProgress.percent !== null ? (
+                      <div
+                        className="h-full bg-indigo-500 transition-all duration-150"
+                        style={{ width: `${downloadProgress.percent}%` }}
+                      />
+                    ) : (
+                      <div className="h-full w-1/3 rounded-full bg-gradient-to-r from-indigo-500 via-sky-400 to-indigo-500 animate-pulse" />
+                    )}
+                  </div>
+                </div>
+              )}
+              {downloadMessage && (
+                <div className="text-xs font-mono text-emerald-300">{downloadMessage}</div>
+              )}
+            </form>
+          )}
+
+          {showExtraPaths && (
+            <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-white">
+                  extra_model_paths.yaml (Shared Model Directories)
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowExtraPaths(false)}
+                  className="text-slate-400 hover:text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <textarea
+                rows={7}
+                value={extraYamlContent}
+                onChange={(e) => setExtraYamlContent(e.target.value)}
+                className="w-full p-3 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono text-slate-200 focus:outline-none focus:border-indigo-500"
+              />
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-mono text-emerald-300">
+                  {extraYamlMessage || 'Changes take effect immediately in Models & VRAM scans.'}
+                </span>
+                <button
+                  type="button"
+                  disabled={isSavingExtraYaml}
+                  onClick={() => void handleSaveExtraPaths()}
+                  className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white"
+                >
+                  {isSavingExtraYaml ? 'Saving…' : 'Save & Rescan'}
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
               <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">

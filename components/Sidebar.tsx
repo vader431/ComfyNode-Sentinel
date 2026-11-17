@@ -5,6 +5,7 @@ import {
   Layers,
   Globe,
   RotateCw,
+  ArrowUpCircle,
   LayoutGrid,
   Stethoscope,
   Workflow,
@@ -71,6 +72,11 @@ export function Sidebar({
           icon: RotateCw,
           badge: updatesCount > 0 ? updatesCount : undefined,
           badgeTone: 'amber',
+        },
+        {
+          id: 'comfy-updater',
+          label: 'ComfyUI Updater',
+          icon: ArrowUpCircle,
         },
         {
           id: 'frontend',

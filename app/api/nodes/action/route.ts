@@ -166,52 +166,100 @@ export async function POST(req: NextRequest) {
           .readdirSync(customNodesDir, { withFileTypes: true })
           .filter((e) => e.isDirectory() && fs.existsSync(path.join(customNodesDir, e.name, '.git')));
 
-        const updates: {
-          folderName: string;
-          hasUpdate: boolean;
-          behindCount: number;
-          latestCommit?: string;
-        }[] = [];
-        const concurrency = 6;
+        const total = entries.length;
+        const wantStream = Boolean(body.stream);
 
-        for (let i = 0; i < entries.length; i += concurrency) {
-          const batch = entries.slice(i, i + concurrency);
-          const batchResults = await Promise.all(
-            batch.map(async (entry) => {
-              const nodePath = path.join(customNodesDir, entry.name);
-              try {
-                await execFileAsync('git', ['-C', nodePath, 'fetch', '--quiet'], { timeout: 15000 });
-                const { stdout: countOut } = await execFileAsync(
-                  'git',
-                  ['-C', nodePath, 'rev-list', 'HEAD..@{u}', '--count'],
-                  { timeout: 5000 }
-                );
-                const behindCount = parseInt(countOut.trim(), 10) || 0;
-                let latestCommit: string | undefined;
-                if (behindCount > 0) {
-                  const { stdout: shaOut } = await execFileAsync(
-                    'git',
-                    ['-C', nodePath, 'rev-parse', '--short', '@{u}'],
-                    { timeout: 5000 }
-                  );
-                  latestCommit = shaOut.trim();
-                }
-                return {
-                  folderName: entry.name,
-                  hasUpdate: behindCount > 0,
-                  behindCount,
-                  latestCommit,
-                };
-              } catch {
-                return null;
-              }
-            })
-          );
-          for (const r of batchResults) {
-            if (r) updates.push(r);
+        const checkOneEntry = async (entry: fs.Dirent) => {
+          const nodePath = path.join(customNodesDir, entry.name);
+          try {
+            await execFileAsync('git', ['-C', nodePath, 'fetch', '--quiet'], { timeout: 15000 });
+            const { stdout: countOut } = await execFileAsync(
+              'git',
+              ['-C', nodePath, 'rev-list', 'HEAD..@{u}', '--count'],
+              { timeout: 5000 }
+            );
+            const behindCount = parseInt(countOut.trim(), 10) || 0;
+            let latestCommit: string | undefined;
+            if (behindCount > 0) {
+              const { stdout: shaOut } = await execFileAsync(
+                'git',
+                ['-C', nodePath, 'rev-parse', '--short', '@{u}'],
+                { timeout: 5000 }
+              );
+              latestCommit = shaOut.trim();
+            }
+            return {
+              folderName: entry.name,
+              hasUpdate: behindCount > 0,
+              behindCount,
+              latestCommit,
+            };
+          } catch {
+            return null;
           }
+        };
+
+        const runCheckLoop = async (
+          onProgress?: (current: number, totalCount: number, folderName: string) => void
+        ) => {
+          const updates: {
+            folderName: string;
+            hasUpdate: boolean;
+            behindCount: number;
+            latestCommit?: string;
+          }[] = [];
+          const concurrency = 6;
+          let completed = 0;
+
+          for (let i = 0; i < entries.length; i += concurrency) {
+            const batch = entries.slice(i, i + concurrency);
+            const batchResults = await Promise.all(
+              batch.map(async (entry) => {
+                const res = await checkOneEntry(entry);
+                completed += 1;
+                onProgress?.(completed, total, entry.name);
+                return res;
+              })
+            );
+            for (const r of batchResults) {
+              if (r) updates.push(r);
+            }
+          }
+          return updates;
+        };
+
+        if (wantStream) {
+          const encoder = new TextEncoder();
+          const stream = new ReadableStream({
+            async start(controller) {
+              const send = (payload: Record<string, unknown>) => {
+                controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
+              };
+              try {
+                send({ type: 'progress', current: 0, total, folderName: '' });
+                const updates = await runCheckLoop((current, totalCount, folderName) => {
+                  send({ type: 'progress', current, total: totalCount, folderName });
+                });
+                send({ type: 'done', success: true, updates });
+              } catch (err) {
+                send({
+                  type: 'error',
+                  error: err instanceof Error ? err.message : 'Failed to check updates',
+                });
+              } finally {
+                controller.close();
+              }
+            },
+          });
+          return new Response(stream, {
+            headers: {
+              'Content-Type': 'application/x-ndjson',
+              'Cache-Control': 'no-cache',
+            },
+          });
         }
 
+        const updates = await runCheckLoop();
         return NextResponse.json({ success: true, updates });
       }
 
