@@ -5,6 +5,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [0.6.1] - 2026-11-17
+
+### Fixed
+- **Desktop App Updater & External Links (`src-tauri/src/lib.rs`, `lib/tauri-bridge.ts`, `components/AppUpdaterModal.tsx`, `components/views/SettingsView.tsx`)**:
+  - Added the `open_external_url` Tauri v2 IPC command (`http://`/`https://` validated) and `nativeOpenExternalUrl` bridge so installer download and GitHub Release buttons open in the OS browser instead of being blocked by WebView2 `target="_blank"`.
+  - Added error handling around `installAndRelaunch` and auto-check on opening `AppUpdaterModal`.
+
+### Docs
+- Updated `README.md` to document the **ComfyUI Updater** tab, real-time progress streaming, and `open_external_url` desktop integration.
+
+---
+
 ## [0.6.0] - 2026-11-17
 
 ### Added

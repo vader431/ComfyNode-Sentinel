@@ -10,7 +10,7 @@
 - **First-Run Onboarding**: Guided ComfyUI folder setup card when `comfyRoot` is not yet configured on disk.
 - **Installed Nodes Inspector**: Real `custom_nodes/` disk scanning, git commit/branch extraction, atomic enable/disable (`Folder` ↔ `Folder.disabled`), `.sentinel_trash` soft-quarantine & restore, Folder Normalizer, and collapsible Storage Charts.
 - **Multi-Instance & Launch Control**: Register and switch between multiple ComfyUI installations (per-instance root, Python binary, server port, and CLI launch flags like `--lowvram` / `--fast` / `--preview-method auto`), manage the background ComfyUI process, and inspect live GPU/WebSocket telemetry.
-- **Updates, Core & Frontend Manager**: Parallelized `git` remote checking, single-node/batch `git pull` (preserving update states across rescans), 1-click `git checkout` rollback history, ComfyUI Core Git updater, and a **Frontend** tab to install, update, or roll back `comfyui-frontend-package` PyPI releases.
+- **Updates, ComfyUI Updater & Frontend Manager**: Parallelized `git` remote checking with real-time NDJSON progress, single-node/batch `git pull` (preserving update states across rescans), 1-click `git checkout` rollback history, a dedicated **ComfyUI Updater** tab (above **Frontend**) with release tag switching/rollback and opt-in `requirements.txt` sync, and a **Frontend** tab to install, update, or roll back `comfyui-frontend-package` PyPI releases.
 - **Crash & Traceback Doctor**: Automatically parses ComfyUI `IMPORT FAILED`, `ModuleNotFoundError`, `custom_nodes/<folder>` tracebacks, and CUDA OOM errors in the Console with 1-click pip module installation or node disabling.
 - **Install & Browse**: Curated community registry + live ComfyUI-Manager sync with **Installed** badges, direct `git clone --depth 1` via URL/branch, and batch URL import.
 - **Command Runner & "Torch Shield"**: Real streaming `child_process.spawn` NDJSON console with Abort support, strict FIFO sequential `pip` queue, `pip` snapshot drift diffing, and automatic detection/stripping of `torch` / `torchvision` / `torchaudio` / `xformers` overrides.
@@ -18,7 +18,7 @@
 - **Missing Nodes & Models Pre-Flight**: Binary PNG/JSON workflow metadata decoder that resolves missing node classes against the community registry and cross-references referenced checkpoints, LoRAs, ControlNets, VAEs, UNETs, and CLIPs against local `models/`.
 - **Models & VRAM Studio**: Scans `models/{checkpoints,loras,controlnet,vae,upscale_models}` with fast partial SHA-256 fingerprinting, replaces duplicate weights with OS symlinks, and estimates workflow VRAM.
 - **Sync & Backup**: `comfy-lock.json` export/import, Cloud Pod `bootstrap.sh` generation, and real 3-way reconciliation on disk.
-- **Desktop Shell & System Tray**: Tauri v2 desktop app with bundled Node.js sidecar, native OS folder/file pickers, minimize-to-tray lifecycle, tray status tooltip sync, and in-app Release & Updater center.
+- **Desktop Shell & System Tray**: Tauri v2 desktop app with bundled Node.js sidecar, native OS folder/file pickers, `open_external_url` browser handoff, minimize-to-tray lifecycle, tray status tooltip sync, and in-app Release & Updater center with download progress.
 
 ---
 
