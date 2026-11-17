@@ -33,6 +33,7 @@ import {
   isTauriEnvironment,
   nativeCheckAppUpdate,
   nativeGetDesktopRuntimeInfo,
+  nativeOpenExternalUrl,
   nativePickDirectory,
   nativePickFile,
   nativeSetMinimizeToTray,
@@ -710,6 +711,18 @@ export function SettingsView({
                           setIsInstallingUpdate(true);
                           try {
                             await updateStatus.installAndRelaunch?.();
+                          } catch (err) {
+                            setUpdateStatus((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    error:
+                                      err instanceof Error
+                                        ? err.message
+                                        : 'Failed to download and install update.',
+                                  }
+                                : prev
+                            );
                           } finally {
                             setIsInstallingUpdate(false);
                           }
@@ -721,10 +734,9 @@ export function SettingsView({
                           : 'Download, Install & Relaunch'}
                       </button>
                     ) : updateStatus.matchedAsset ? (
-                      <a
-                        href={updateStatus.matchedAsset.downloadUrl}
-                        target="_blank"
-                        rel="noreferrer"
+                      <button
+                        type="button"
+                        onClick={() => void nativeOpenExternalUrl(updateStatus.matchedAsset!.downloadUrl)}
                         className="flex items-center justify-between gap-2 w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors"
                       >
                         <span className="truncate">
@@ -733,22 +745,21 @@ export function SettingsView({
                         <span className="text-[10px] font-mono tabular-nums opacity-90 shrink-0">
                           {formatAssetSizeMb(updateStatus.matchedAsset.sizeBytes)}
                         </span>
-                      </a>
+                      </button>
                     ) : null}
                   </div>
                 ) : (
                   <div className="p-2.5 rounded-lg border border-slate-800 bg-slate-950/60 flex items-center justify-between text-[11px] font-mono text-slate-300">
                     <span>Up to date (v{pkg.version})</span>
                     {updateStatus.releaseUrl && (
-                      <a
-                        href={updateStatus.releaseUrl}
-                        target="_blank"
-                        rel="noreferrer"
+                      <button
+                        type="button"
+                        onClick={() => void nativeOpenExternalUrl(updateStatus.releaseUrl!)}
                         className="flex items-center gap-1 text-indigo-300 hover:text-indigo-200"
                       >
                         <span>Releases</span>
                         <ExternalLink className="w-3 h-3" />
-                      </a>
+                      </button>
                     )}
                   </div>
                 )}
@@ -758,17 +769,16 @@ export function SettingsView({
                     <div className="text-[10px] font-mono text-slate-400">
                       Matched Desktop Installer for Your OS:
                     </div>
-                    <a
-                      href={updateStatus.matchedAsset.downloadUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center justify-between gap-2 text-[11px] font-mono text-indigo-300 hover:text-indigo-200"
+                    <button
+                      type="button"
+                      onClick={() => void nativeOpenExternalUrl(updateStatus.matchedAsset!.downloadUrl)}
+                      className="flex items-center justify-between gap-2 w-full text-[11px] font-mono text-indigo-300 hover:text-indigo-200"
                     >
                       <span className="truncate">{updateStatus.matchedAsset.name}</span>
                       <span className="text-slate-500 shrink-0 tabular-nums">
                         {formatAssetSizeMb(updateStatus.matchedAsset.sizeBytes)}
                       </span>
-                    </a>
+                    </button>
                   </div>
                 )}
 

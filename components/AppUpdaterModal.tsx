@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, Download, RefreshCw, CheckCircle2, AlertCircle, Package } from 'lucide-react';
 import {
   AppUpdateStatus,
   nativeCheckAppUpdate,
+  nativeOpenExternalUrl,
 } from '@/lib/tauri-bridge';
 import pkg from '../package.json';
 
@@ -17,16 +18,16 @@ export function AppUpdaterModal({ isOpen, onClose }: AppUpdaterModalProps) {
   const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus | null>(null);
   const [isChecking, setIsChecking] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
   const [installProgress, setInstallProgress] = useState<{
     downloaded: number;
     total: number | null;
     percent: number | null;
   } | null>(null);
 
-  if (!isOpen) return null;
-
   const handleCheck = async () => {
     setIsChecking(true);
+    setInstallError(null);
     try {
       const res = await nativeCheckAppUpdate(pkg.version);
       setUpdateStatus(res);
@@ -34,6 +35,27 @@ export function AppUpdaterModal({ isOpen, onClose }: AppUpdaterModalProps) {
       setIsChecking(false);
     }
   };
+
+  useEffect(() => {
+    if (!isOpen || updateStatus !== null) return;
+    let cancelled = false;
+    void Promise.resolve()
+      .then(() => {
+        if (!cancelled) setIsChecking(true);
+        return nativeCheckAppUpdate(pkg.version);
+      })
+      .then((res) => {
+        if (!cancelled) setUpdateStatus(res);
+      })
+      .finally(() => {
+        if (!cancelled) setIsChecking(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, updateStatus]);
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
@@ -122,9 +144,14 @@ export function AppUpdaterModal({ isOpen, onClose }: AppUpdaterModalProps) {
                         disabled={isInstalling}
                         onClick={async () => {
                           setIsInstalling(true);
+                          setInstallError(null);
                           setInstallProgress({ downloaded: 0, total: null, percent: 0 });
                           try {
                             await updateStatus.installAndRelaunch?.((p) => setInstallProgress(p));
+                          } catch (err) {
+                            setInstallError(
+                              err instanceof Error ? err.message : 'Failed to download and install update.'
+                            );
                           } finally {
                             setIsInstalling(false);
                           }
@@ -154,28 +181,31 @@ export function AppUpdaterModal({ isOpen, onClose }: AppUpdaterModalProps) {
                           </div>
                         </div>
                       )}
+                      {installError && (
+                        <div className="p-2.5 rounded-lg border border-rose-800/60 bg-rose-950/30 text-[11px] font-mono text-rose-300">
+                          {installError}
+                        </div>
+                      )}
                     </div>
                   ) : updateStatus.matchedAsset ? (
-                    <a
-                      href={updateStatus.matchedAsset.downloadUrl}
-                      target="_blank"
-                      rel="noreferrer"
+                    <button
+                      type="button"
+                      onClick={() => void nativeOpenExternalUrl(updateStatus.matchedAsset!.downloadUrl)}
                       className="flex items-center justify-between w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md transition-colors"
                     >
                       <span>Download {updateStatus.matchedAsset.platformLabel}</span>
                       <span className="font-mono text-[10px] tabular-nums opacity-90">
                         {(updateStatus.matchedAsset.sizeBytes / (1024 * 1024)).toFixed(1)} MB
                       </span>
-                    </a>
+                    </button>
                   ) : updateStatus.releaseUrl ? (
-                    <a
-                      href={updateStatus.releaseUrl}
-                      target="_blank"
-                      rel="noreferrer"
+                    <button
+                      type="button"
+                      onClick={() => void nativeOpenExternalUrl(updateStatus.releaseUrl!)}
                       className="flex items-center justify-center w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md transition-colors"
                     >
                       View Release on GitHub
-                    </a>
+                    </button>
                   ) : null}
                 </div>
               ) : (

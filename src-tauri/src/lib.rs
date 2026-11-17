@@ -217,6 +217,36 @@ fn quarantine_node_to_trash(custom_nodes_path: String, folder_name: String) -> R
 }
 
 #[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    let trimmed = url.trim();
+    if !trimmed.starts_with("https://") && !trimmed.starts_with("http://") {
+        return Err("Only http:// and https:// URLs are allowed".to_string());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", trimmed])
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {e}"))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(trimmed)
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {e}"))?;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(trimmed)
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {e}"))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn scan_custom_nodes(custom_nodes_path: String) -> Result<Vec<DiscoveredNode>, String> {
     let base = Path::new(&custom_nodes_path);
     if !base.is_dir() {
@@ -470,7 +500,8 @@ pub fn run() {
             sync_tray_status,
             get_desktop_runtime_info,
             pick_directory,
-            pick_file
+            pick_file,
+            open_external_url
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

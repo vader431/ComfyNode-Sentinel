@@ -11,6 +11,7 @@ fn main() {
                 "get_desktop_runtime_info",
                 "pick_directory",
                 "pick_file",
+                "open_external_url",
             ]),
         ),
     )

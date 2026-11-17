@@ -379,6 +379,25 @@ export async function nativeQuarantineNodeToTrash(
 }
 
 /**
+ * Opens an external http/https URL in the user's default browser (works in both Tauri desktop and web).
+ */
+export async function nativeOpenExternalUrl(url: string): Promise<void> {
+  const trimmed = (url || '').trim();
+  if (!trimmed) return;
+  if (isTauriEnvironment()) {
+    try {
+      await invoke<void>('open_external_url', { url: trimmed });
+      return;
+    } catch (err) {
+      console.error('Tauri open_external_url error:', err);
+    }
+  }
+  if (typeof window !== 'undefined') {
+    window.open(trimmed, '_blank', 'noopener,noreferrer');
+  }
+}
+
+/**
  * Native filesystem scan of custom_nodes directory
  */
 export async function nativeScanCustomNodes(

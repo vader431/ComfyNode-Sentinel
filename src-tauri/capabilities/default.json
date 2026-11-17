@@ -27,6 +27,7 @@
     "allow-sync-tray-status",
     "allow-get-desktop-runtime-info",
     "allow-pick-directory",
-    "allow-pick-file"
+    "allow-pick-file",
+    "allow-open-external-url"
   ]
 }
