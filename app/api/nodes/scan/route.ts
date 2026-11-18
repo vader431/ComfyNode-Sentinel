@@ -29,11 +29,19 @@ function scanDirectoryAsNodes(
   const requirementsMap: Record<string, string[]> = {};
 
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
     const folderName = entry.name;
     if (folderName.startsWith('.') || folderName === '__pycache__') continue;
 
     const fullPath = path.join(baseDir, folderName);
+    let isDir = entry.isDirectory();
+    if (!isDir && entry.isSymbolicLink()) {
+      try {
+        isDir = fs.statSync(fullPath).isDirectory();
+      } catch {
+        isDir = false;
+      }
+    }
+    if (!isDir) continue;
     const enabled = isTrash ? false : !folderName.endsWith('.disabled');
     const cleanBase = folderName.replace(/\.disabled$/, '');
     const cleanDisplayName = cleanBase.replace(/^ComfyUI[-_]/i, '').replace(/[-_]+/g, ' ');

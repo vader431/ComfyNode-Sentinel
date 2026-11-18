@@ -5,6 +5,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [0.6.2] - 2026-11-18
+
+### Changed
+- **Refactored Model Storage & VRAM Studio (`components/views/ModelsView.tsx`, `components/views/models/*`)**:
+  - Split the monolithic `ModelsView` into 5 focused sub-components (`ModelDownloaderPanel`, `ExtraModelPathsPanel`, `DuplicateGroupsPanel`, `ModelInventoryTable`, `VramEstimatorPanel`) with model inventory search, empty-state handling, and per-group deduplication loading states.
+
+### Fixed
+- **Persistent Settings & ComfyUI Root (`src-tauri/src/lib.rs`, `app/api/state/route.ts`, `app/page.tsx`)**:
+  - Preferred a stable localhost port (`127.0.0.1:47321`, falling back to `:0` if occupied) so WebView `localStorage` survives restarts, and added durable disk-backed persistence in `~/.comfynode-sentinel/state.json` via `/api/state`.
+- **Complete Custom Node & Update Discovery (`app/api/nodes/scan/route.ts`, `app/api/nodes/action/route.ts`, `components/views/RegistryView.tsx`)**:
+  - Followed symlinked/junctioned custom node folders during scans and update checks, added `origin/<branch>` / `origin/HEAD` / `origin/main` / `origin/master` fallbacks when `@{u}` is unset, increased `git fetch` timeout to 30s, and labeled non-git folders with `No .git`.
+
+---
+
 ## [0.6.1] - 2026-11-17
 
 ### Fixed

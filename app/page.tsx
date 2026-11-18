@@ -171,24 +171,36 @@ function SentinelWorkspace() {
     StorageService.setTrash(newTrash);
   };
 
+  const persistDiskState = useCallback((patch: Record<string, unknown>) => {
+    fetch('/api/state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }).catch(() => { });
+  }, []);
+
   const updateProfiles = (newProfiles: WorkspaceProfile[]) => {
     setProfiles(newProfiles);
     StorageService.setProfiles(newProfiles);
+    persistDiskState({ profiles: newProfiles });
   };
 
   const updateActiveProfile = (id: string) => {
     setActiveProfileId(id);
     StorageService.setActiveProfileId(id);
+    persistDiskState({ activeProfileId: id });
   };
 
   const updateAliases = (newAliases: Record<string, string>) => {
     setAliases(newAliases);
     StorageService.setAliases(newAliases);
+    persistDiskState({ aliases: newAliases });
   };
 
   const updateSettings = (newSettings: EnvironmentSettings) => {
     setSettings(newSettings);
     StorageService.setSettings(newSettings);
+    persistDiskState({ settings: newSettings });
   };
 
   const performFullScan = useCallback(async (comfyRoot: string, pythonBinary?: string) => {
@@ -206,6 +218,7 @@ function SentinelWorkspace() {
           hasCustomNodes: env.hasCustomNodes,
         };
         StorageService.setSettings(next);
+        persistDiskState({ settings: next });
         return next;
       });
 
@@ -244,7 +257,7 @@ function SentinelWorkspace() {
     } finally {
       setIsScanning(false);
     }
-  }, []);
+  }, [persistDiskState]);
 
   // Sync minimize-to-tray preference with Tauri shell on startup
   useEffect(() => {
@@ -432,13 +445,89 @@ function SentinelWorkspace() {
       stepProgress: null,
     };
 
-  // Live environment & custom_nodes scanner on startup
+  // Hydrate durable disk state (~/.comfynode-sentinel/state.json) & scan on startup
   useEffect(() => {
-    if (!isClient || !settings.comfyRoot) return;
+    if (!isClient) return;
+    let cancelled = false;
+
+    const initAndScan = async () => {
+      try {
+        const res = await fetch('/api/state');
+        if (res.ok && !cancelled) {
+          const data = (await res.json()) as {
+            exists?: boolean;
+            state?: {
+              settings?: EnvironmentSettings;
+              instances?: ComfyInstance[];
+              activeInstanceId?: string;
+              profiles?: WorkspaceProfile[];
+              activeProfileId?: string;
+              aliases?: Record<string, string>;
+              transactions?: UpdateTransaction[];
+            } | null;
+          };
+
+          if (data.exists && data.state) {
+            const disk = data.state;
+            if (Array.isArray(disk.instances) && disk.instances.length > 0) {
+              setInstances(disk.instances);
+              StorageService.setInstances(disk.instances);
+            }
+            if (typeof disk.activeInstanceId === 'string' && disk.activeInstanceId) {
+              setActiveInstanceId(disk.activeInstanceId);
+              StorageService.setActiveInstanceId(disk.activeInstanceId);
+            }
+            if (Array.isArray(disk.profiles) && disk.profiles.length > 0) {
+              setProfiles(disk.profiles);
+              StorageService.setProfiles(disk.profiles);
+            }
+            if (typeof disk.activeProfileId === 'string' && disk.activeProfileId) {
+              setActiveProfileId(disk.activeProfileId);
+              StorageService.setActiveProfileId(disk.activeProfileId);
+            }
+            if (disk.aliases && typeof disk.aliases === 'object') {
+              setAliases(disk.aliases);
+              StorageService.setAliases(disk.aliases);
+            }
+            if (Array.isArray(disk.transactions)) {
+              setTransactions(disk.transactions);
+              StorageService.setTransactions(disk.transactions);
+            }
+            if (disk.settings?.comfyRoot) {
+              setSettings(disk.settings);
+              StorageService.setSettings(disk.settings);
+              await performFullScan(disk.settings.comfyRoot, disk.settings.pythonBinary);
+              return;
+            }
+          } else if (settings.comfyRoot) {
+            // Migrate existing localStorage settings to durable disk state
+            persistDiskState({
+              settings,
+              instances,
+              activeInstanceId,
+              profiles,
+              activeProfileId,
+              aliases,
+              transactions,
+            });
+          }
+        }
+      } catch {
+        // Fallback to localStorage state if /api/state is unavailable
+      }
+
+      if (!cancelled && settings.comfyRoot) {
+        await performFullScan(settings.comfyRoot, settings.pythonBinary);
+      }
+    };
+
     const timer = setTimeout(() => {
-      void performFullScan(settings.comfyRoot, settings.pythonBinary);
+      void initAndScan();
     }, 0);
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isClient]);
 
@@ -1239,6 +1328,7 @@ function SentinelWorkspace() {
   const handleSaveInstances = (nextInstances: ComfyInstance[]) => {
     setInstances(nextInstances);
     StorageService.setInstances(nextInstances);
+    persistDiskState({ instances: nextInstances });
   };
 
   const handleSwitchInstance = async (instanceId: string) => {
@@ -1256,6 +1346,7 @@ function SentinelWorkspace() {
     };
     setSettings(nextSettings);
     StorageService.setSettings(nextSettings);
+    persistDiskState({ activeInstanceId: target.id, settings: nextSettings });
     pushToast('info', `Switched to ${target.name}`, `${target.comfyRoot} (:${target.port})`);
     await performFullScan(target.comfyRoot, target.pythonBinary);
   };

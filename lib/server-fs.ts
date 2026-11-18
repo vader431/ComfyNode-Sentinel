@@ -24,7 +24,7 @@ export function resolveSafeSubpath(baseDir: string, ...segments: string[]): stri
  * Reads the runtime OS user home directory without allowing @vercel/nft
  * to statically inline the build machine's home directory into a wildcard glob.
  */
-function getRuntimeHomeDir(): string {
+export function getRuntimeHomeDir(): string {
   const envHome = process.env.HOME || process.env.USERPROFILE;
   if (envHome) return envHome;
   const method = ['home', 'dir'].join('') as 'homedir';

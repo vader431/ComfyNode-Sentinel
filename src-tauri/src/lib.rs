@@ -426,8 +426,10 @@ pub fn run() {
                         .build(),
                 )?;
             } else {
-                // Launch bundled Next.js standalone server on a free localhost port
-                let port = TcpListener::bind("127.0.0.1:0")
+                // Launch bundled Next.js standalone server on a preferred stable localhost port
+                // so WebView localStorage origin persists across restarts (falling back to :0 if busy)
+                let port = TcpListener::bind("127.0.0.1:47321")
+                    .or_else(|_| TcpListener::bind("127.0.0.1:0"))
                     .and_then(|l| l.local_addr())
                     .map(|a| a.port())
                     .unwrap_or(3188);

@@ -26,7 +26,7 @@
 
 ### 1. Backend & Desktop Strategy
 * **Standalone Server API (`app/api/*`)**:
-  * `/api/environment`, `/api/environment/core`, `/api/environment/pick` — Validates `main.py` & `custom_nodes/`, detects Python runtimes, checks/pulls ComfyUI core Git updates, and provides host OS directory/file pickers.
+  * `/api/environment`, `/api/environment/core`, `/api/environment/pick`, `/api/state` — Validates `main.py` & `custom_nodes/`, detects Python runtimes, checks/pulls ComfyUI core Git updates, provides host OS directory/file pickers, and persists settings/instances to `~/.comfynode-sentinel/state.json`.
   * `/api/nodes/scan` & `/api/nodes/action` — Scans `custom_nodes/` & `.sentinel_trash/`, reads `requirements.txt`, lints `.py` files, and executes `toggle`, `uninstall`, `restore`, `normalize`, `clone`, `check_updates`, `update`, `rollback`, `read_file`, and `patch_file`.
   * `/api/comfy/process` & `/api/comfy/telemetry` — Spawns/stops/restarts managed ComfyUI with per-instance CLI flags, tails logs, and polls live GPU/VRAM/WebSocket queue telemetry.
   * `/api/env/pip-snapshot`, `/api/env/frontend`, `/api/registry/sync` — Captures `pip` freeze snapshots & drift diffs, manages `comfyui-frontend-package` PyPI versions, and syncs upstream ComfyUI-Manager registries.

@@ -164,18 +164,82 @@ export async function POST(req: NextRequest) {
         }
         const entries = fs
           .readdirSync(customNodesDir, { withFileTypes: true })
-          .filter((e) => e.isDirectory() && fs.existsSync(path.join(customNodesDir, e.name, '.git')));
+          .filter((e) => {
+            if (e.name.startsWith('.') || e.name === '__pycache__') return false;
+            const nodePath = path.join(customNodesDir, e.name);
+            let isDir = e.isDirectory();
+            if (!isDir && e.isSymbolicLink()) {
+              try {
+                isDir = fs.statSync(nodePath).isDirectory();
+              } catch {
+                isDir = false;
+              }
+            }
+            return isDir && fs.existsSync(path.join(nodePath, '.git'));
+          });
 
         const total = entries.length;
         const wantStream = Boolean(body.stream);
 
+        const resolveUpstreamRef = async (nodePath: string): Promise<string | null> => {
+          try {
+            const { stdout } = await execFileAsync(
+              'git',
+              ['-C', nodePath, 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'],
+              { timeout: 5000 }
+            );
+            const ref = stdout.trim();
+            if (ref) return ref;
+          } catch {
+            // No upstream tracking branch configured; try origin fallbacks
+          }
+
+          const candidates: string[] = [];
+          try {
+            const { stdout } = await execFileAsync(
+              'git',
+              ['-C', nodePath, 'rev-parse', '--abbrev-ref', 'HEAD'],
+              { timeout: 5000 }
+            );
+            const branch = stdout.trim();
+            if (branch && branch !== 'HEAD') {
+              candidates.push(`origin/${branch}`);
+            }
+          } catch {
+            // ignore
+          }
+          candidates.push('origin/HEAD', 'origin/main', 'origin/master');
+
+          for (const candidate of candidates) {
+            try {
+              await execFileAsync(
+                'git',
+                ['-C', nodePath, 'rev-parse', '--verify', candidate],
+                { timeout: 5000 }
+              );
+              return candidate;
+            } catch {
+              // try next candidate
+            }
+          }
+          return null;
+        };
+
         const checkOneEntry = async (entry: fs.Dirent) => {
           const nodePath = path.join(customNodesDir, entry.name);
           try {
-            await execFileAsync('git', ['-C', nodePath, 'fetch', '--quiet'], { timeout: 15000 });
+            await execFileAsync('git', ['-C', nodePath, 'fetch', '--quiet'], { timeout: 30000 });
+            const upstreamRef = await resolveUpstreamRef(nodePath);
+            if (!upstreamRef) {
+              return {
+                folderName: entry.name,
+                hasUpdate: false,
+                behindCount: 0,
+              };
+            }
             const { stdout: countOut } = await execFileAsync(
               'git',
-              ['-C', nodePath, 'rev-list', 'HEAD..@{u}', '--count'],
+              ['-C', nodePath, 'rev-list', `HEAD..${upstreamRef}`, '--count'],
               { timeout: 5000 }
             );
             const behindCount = parseInt(countOut.trim(), 10) || 0;
@@ -183,7 +247,7 @@ export async function POST(req: NextRequest) {
             if (behindCount > 0) {
               const { stdout: shaOut } = await execFileAsync(
                 'git',
-                ['-C', nodePath, 'rev-parse', '--short', '@{u}'],
+                ['-C', nodePath, 'rev-parse', '--short', upstreamRef],
                 { timeout: 5000 }
               );
               latestCommit = shaOut.trim();
@@ -195,7 +259,11 @@ export async function POST(req: NextRequest) {
               latestCommit,
             };
           } catch {
-            return null;
+            return {
+              folderName: entry.name,
+              hasUpdate: false,
+              behindCount: 0,
+            };
           }
         };
 

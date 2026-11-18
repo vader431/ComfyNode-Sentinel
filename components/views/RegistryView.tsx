@@ -664,7 +664,11 @@ export function RegistryView({
                             </div>
                           </td>
                           <td className="py-3 px-4">
-                            {n.hasUpdate ? (
+                            {!n.gitUrl ? (
+                              <span className="inline-flex px-2 py-0.5 rounded-full bg-slate-900 border border-slate-700/70 text-[10px] font-mono text-slate-400 whitespace-nowrap">
+                                No .git
+                              </span>
+                            ) : n.hasUpdate ? (
                               <span className="inline-flex px-2 py-0.5 rounded-full bg-amber-950/70 border border-amber-700/60 text-[10px] font-mono text-amber-300 whitespace-nowrap">
                                 Update available
                               </span>
