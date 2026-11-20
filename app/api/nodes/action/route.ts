@@ -181,12 +181,20 @@ export async function POST(req: NextRequest) {
         const total = entries.length;
         const wantStream = Boolean(body.stream);
 
+        const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+        const runGitNode = (nodePath: string, args: string[], timeout = 10000) =>
+          execFileAsync('git', ['-c', 'safe.directory=*', '-C', nodePath, ...args], {
+            timeout,
+            windowsHide: true,
+            env: gitEnv,
+          });
+
         const resolveUpstreamRef = async (nodePath: string): Promise<string | null> => {
           try {
-            const { stdout } = await execFileAsync(
-              'git',
-              ['-C', nodePath, 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'],
-              { timeout: 5000 }
+            const { stdout } = await runGitNode(
+              nodePath,
+              ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'],
+              5000
             );
             const ref = stdout.trim();
             if (ref) return ref;
@@ -196,11 +204,7 @@ export async function POST(req: NextRequest) {
 
           const candidates: string[] = [];
           try {
-            const { stdout } = await execFileAsync(
-              'git',
-              ['-C', nodePath, 'rev-parse', '--abbrev-ref', 'HEAD'],
-              { timeout: 5000 }
-            );
+            const { stdout } = await runGitNode(nodePath, ['rev-parse', '--abbrev-ref', 'HEAD'], 5000);
             const branch = stdout.trim();
             if (branch && branch !== 'HEAD') {
               candidates.push(`origin/${branch}`);
@@ -212,11 +216,7 @@ export async function POST(req: NextRequest) {
 
           for (const candidate of candidates) {
             try {
-              await execFileAsync(
-                'git',
-                ['-C', nodePath, 'rev-parse', '--verify', candidate],
-                { timeout: 5000 }
-              );
+              await runGitNode(nodePath, ['rev-parse', '--verify', candidate], 5000);
               return candidate;
             } catch {
               // try next candidate
@@ -225,38 +225,96 @@ export async function POST(req: NextRequest) {
           return null;
         };
 
+        const checkRemoteViaLsRemote = async (
+          nodePath: string
+        ): Promise<{ hasUpdate: boolean; latestCommit?: string } | null> => {
+          try {
+            const { stdout: headOut } = await runGitNode(nodePath, ['rev-parse', 'HEAD'], 5000);
+            const localHead = headOut.trim();
+            if (!localHead) return null;
+
+            let branch = '';
+            try {
+              const { stdout: branchOut } = await runGitNode(
+                nodePath,
+                ['rev-parse', '--abbrev-ref', 'HEAD'],
+                5000
+              );
+              branch = branchOut.trim();
+            } catch {
+              branch = '';
+            }
+
+            const targetRef = branch && branch !== 'HEAD' ? `refs/heads/${branch}` : 'HEAD';
+            const { stdout: lsOut } = await runGitNode(
+              nodePath,
+              ['ls-remote', 'origin', targetRef],
+              15000
+            );
+            const firstLine = lsOut.split(/\r?\n/).find((l) => l.trim());
+            if (!firstLine) return null;
+            const remoteSha = firstLine.split(/\s+/)[0]?.trim();
+            if (!remoteSha || remoteSha === localHead) {
+              return { hasUpdate: false };
+            }
+
+            // Do not flag as an update if remoteSha is already an ancestor of local HEAD
+            try {
+              await runGitNode(nodePath, ['merge-base', '--is-ancestor', remoteSha, 'HEAD'], 5000);
+              return { hasUpdate: false };
+            } catch {
+              return {
+                hasUpdate: true,
+                latestCommit: remoteSha.slice(0, 7),
+              };
+            }
+          } catch {
+            return null;
+          }
+        };
+
         const checkOneEntry = async (entry: fs.Dirent) => {
           const nodePath = path.join(customNodesDir, entry.name);
           try {
-            await execFileAsync('git', ['-C', nodePath, 'fetch', '--quiet'], { timeout: 30000 });
+            await runGitNode(nodePath, ['fetch', '--quiet'], 30000).catch(() => {});
             const upstreamRef = await resolveUpstreamRef(nodePath);
-            if (!upstreamRef) {
+            if (upstreamRef) {
+              const { stdout: countOut } = await runGitNode(
+                nodePath,
+                ['rev-list', `HEAD..${upstreamRef}`, '--count'],
+                5000
+              );
+              const behindCount = parseInt(countOut.trim(), 10) || 0;
+              if (behindCount > 0) {
+                const { stdout: shaOut } = await runGitNode(
+                  nodePath,
+                  ['rev-parse', '--short', upstreamRef],
+                  5000
+                );
+                return {
+                  folderName: entry.name,
+                  hasUpdate: true,
+                  behindCount,
+                  latestCommit: shaOut.trim(),
+                };
+              }
+            }
+
+            // Cross-check with `git ls-remote origin` for shallow/detached/untracked repos
+            const lsCheck = await checkRemoteViaLsRemote(nodePath);
+            if (lsCheck?.hasUpdate) {
               return {
                 folderName: entry.name,
-                hasUpdate: false,
-                behindCount: 0,
+                hasUpdate: true,
+                behindCount: 1,
+                latestCommit: lsCheck.latestCommit,
               };
             }
-            const { stdout: countOut } = await execFileAsync(
-              'git',
-              ['-C', nodePath, 'rev-list', `HEAD..${upstreamRef}`, '--count'],
-              { timeout: 5000 }
-            );
-            const behindCount = parseInt(countOut.trim(), 10) || 0;
-            let latestCommit: string | undefined;
-            if (behindCount > 0) {
-              const { stdout: shaOut } = await execFileAsync(
-                'git',
-                ['-C', nodePath, 'rev-parse', '--short', upstreamRef],
-                { timeout: 5000 }
-              );
-              latestCommit = shaOut.trim();
-            }
+
             return {
               folderName: entry.name,
-              hasUpdate: behindCount > 0,
-              behindCount,
-              latestCommit,
+              hasUpdate: false,
+              behindCount: 0,
             };
           } catch {
             return {
@@ -341,9 +399,32 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ error: `${folderName} is not a git repository.` }, { status: 400 });
         }
         const prevMeta = readGitMetadata(resolved.fullPath);
-        const { stdout, stderr } = await execFileAsync('git', ['-C', resolved.fullPath, 'pull'], {
+        const pullOpts = {
           timeout: 60000,
-        });
+          windowsHide: true,
+          env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+        };
+        let stdout = '';
+        let stderr = '';
+        try {
+          ({ stdout, stderr } = await execFileAsync(
+            'git',
+            ['-c', 'safe.directory=*', '-C', resolved.fullPath, 'pull'],
+            pullOpts
+          ));
+        } catch (pullErr) {
+          const fallbackBranch =
+            prevMeta.branch && prevMeta.branch !== 'detached' ? prevMeta.branch : 'main';
+          try {
+            ({ stdout, stderr } = await execFileAsync(
+              'git',
+              ['-c', 'safe.directory=*', '-C', resolved.fullPath, 'pull', 'origin', fallbackBranch],
+              pullOpts
+            ));
+          } catch {
+            throw pullErr;
+          }
+        }
         const newMeta = readGitMetadata(resolved.fullPath);
 
         return NextResponse.json({

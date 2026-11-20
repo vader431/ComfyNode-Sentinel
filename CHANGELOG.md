@@ -5,6 +5,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [0.6.3] - 2026-11-20
+
+### Fixed
+- **Custom Node Update Detection (`app/api/nodes/action/route.ts`)**:
+  - Passed `-c safe.directory=*` and `GIT_TERMINAL_PROMPT=0` to `git` in `check_updates` and `update` to prevent silent failures on Windows-owned repositories.
+  - Added `git ls-remote origin` cross-checking (with `git merge-base --is-ancestor` guard) for shallow `--depth 1`, detached `HEAD`, and untracked custom node clones.
+  - Added a `git pull origin <branch>` fallback when `git pull` has no upstream tracking branch configured.
+
+---
+
 ## [0.6.2] - 2026-11-18
 
 ### Changed
